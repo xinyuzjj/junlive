@@ -7,16 +7,11 @@
  *   自己拿到的 hlsManifestUrl 能拉列表、但分片一律 403（表现是一直缓冲）。
  *   这不是我们能绕过的，只能用官方播放器。
  *
- * **twitch 已改回自建流**（原来在这里是错的）：
- * 之前把 Twitch 也归到 iframe，用 `player.twitch.tv` 官方播放器，实测问题一堆：
- *   ① iframe 里的请求由 WebView 发出，**不经过 Rust**，读不到我们存的代理；
- *   ② `parent` 参数校验一旦不匹配就整页拒绝（实测不带 parent 直接报
- *      「哎哟！该嵌入配置错误。」）；
- *   ③ 官方播放器自带控件，我们的画质/线路选择器对它无效。
- * 而我们的 `platforms/twitch.rs` **本来就已经实现了完整的自建流**
- * （GQL 取 streamPlaybackAccessToken → usher 换 m3u8），一直被我浪费着。
- * 参考 github.com/ilanzgx/multistream 的 `TwitchNativePlayer.vue`：它也是
- * `invoke("twitch_get_hls_url")` 拿地址后交给 hls.js 播，**同样不用 iframe**。
+ * - **twitch**：用官方播放器。实测它更流畅（自建流虽然能到 1080p，
+ *   但 usher 的 token 有时效、ABR 切档偶尔会卡；官方播放器自己管
+ *   清晰度选择、鉴权与重连，稳定性更好）。
+ *   ⚠️ 代价：Twitch 对 embed 有画质上限，实测锁在 **640x360**
+ *   （自建流能到 1920x1080）。这是 Twitch 的政策，改不了。
  *
  * **SOOP 不走 embed**（试过，已撤回）：
  * 官方 embed 的画质选择器被官方硬关掉了（HTML 里 `<!-- 화질선택 임베디드는 미노출 -->`），
@@ -27,17 +22,21 @@
  * 它自带的全屏是 iframe 内部全屏，弹幕层会被盖住，所以全屏要用我们自己的按钮。
  */
 import { soopEmbedSrc, soopMode, soopOfficialSrc } from "./soopMode";
+import { twitchMode } from "./twitchMode";
 
 export const EMBED_PLATFORMS = ["youtube"];
 
 /**
- * SOOP 例外：**是否走官方播放器由用户设置决定**（见 `soopMode.ts`）。
- * 所以它既不在 EMBED_PLATFORMS 里（默认自建流），又可能临时走 embed。
+ * SOOP / Twitch 例外：**是否走官方播放器由用户设置决定**
+ * （见 `soopMode.ts` / `twitchMode.ts`）。
+ * 所以它们既不在 EMBED_PLATFORMS 里（默认自建流），又可能临时走 embed。
  */
 export function isEmbedPlatform(p?: string): boolean {
   if (!p) return false;
   // SOOP：只有「自建流」不走 iframe，另外两种官方方式都走
   if (p === "soop") return soopMode.value !== "native";
+  // Twitch：用户可自选官方播放器（流畅）或自建流（1080p）
+  if (p === "twitch") return twitchMode.value === "official";
   return EMBED_PLATFORMS.includes(p);
 }
 

@@ -42,6 +42,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import Player from "../components/Player.vue";
 import { store } from "../store";
 import { soopMode } from "../soopMode";
+import { twitchMode } from "../twitchMode";
 import {
   DM_COLOR_MODES,
   dmArea,
@@ -555,6 +556,13 @@ const soopOptions = [
   { v: "official", label: "官方完整页（带官网界面）" },
 ] as const;
 
+/* ---------------- Twitch 播放方式（官方播放器 / 自建流，用户自选） ---------------- */
+const isTwitch = () => props.platform === "twitch";
+const twitchOptions = [
+  { v: "official", label: "官方播放器（更流畅，画质锁 640×360）" },
+  { v: "native", label: "自建流（画质 1080p，token 约 1 小时）" },
+] as const;
+
 /** 画面比例可选项（对齐 Simple Live「画面尺寸」的前三项） */
 const fitOptions = [
   { v: "contain", label: "适应" },
@@ -889,6 +897,24 @@ onBeforeUnmount(() => {
             @click="soopMode = o.v"
           >
             {{ o.label }}<span v-if="soopMode === o.v" class="tick">✓</span>
+          </button>
+        </template>
+
+        <!--
+          Twitch 播放方式：官方播放器更流畅但画质锁 640x360，
+          自建流能到 1080p 但 token 有时效。放在播放页的「更多」里，
+          不用跑到设置页 —— 换台看 Twitch 时最容易想的就是「怎么这么糊」。
+        -->
+        <template v-if="isTwitch()">
+          <div class="mr-sheet-head">Twitch 播放方式</div>
+          <button
+            v-for="o in twitchOptions"
+            :key="o.v"
+            class="mr-sheet-item"
+            :class="{ on: twitchMode === o.v }"
+            @click="twitchMode = o.v"
+          >
+            {{ o.label }}<span v-if="twitchMode === o.v" class="tick">✓</span>
           </button>
         </template>
 
