@@ -64,6 +64,14 @@ jobs:
           done
           aarch64-linux-android-ranlib --version | head -1
 
+      # rquickjs 的 bindgen 特性需要 libclang 现场生成 Android 绑定
+      - name: 安装 libclang（rquickjs bindgen 用）
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libclang-dev clang
+          echo "LIBCLANG_PATH=$(llvm-config --libdir 2>/dev/null || echo /usr/lib/llvm-18/lib)" >> "$GITHUB_ENV"
+          ls /usr/lib/llvm-*/lib/libclang.so* 2>/dev/null | head -3 || true
+
       - name: 安装 Rust（含 Android 目标）
         uses: dtolnay/rust-toolchain@stable
         with:

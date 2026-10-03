@@ -35,6 +35,28 @@ const embedSrc = computed(() =>
 const wrapRef = ref<HTMLDivElement | null>(null);
 const videoRef = ref<HTMLVideoElement | null>(null);
 
+/**
+ * SOOP 画质（**结论：官方 embed 调不了，已实测**）
+ *
+ * embed 页面把画质选择框硬关掉了（HTML 里 `<!-- 화질선택 임베디드는 미노출 -->`），
+ * 画质走 auto，在 WebView 里实测落在 640x360 SD 档。
+ *
+ * 播放器内部确实有 postMessage 通道：
+ *   window.addEventListener("message", t => t.data.cmd && this[t.data.cmd](t.data))
+ * 但**父页面能发的命令只有** Pload / postData / postMediaEvent / postSetDialog /
+ * receivedExtension / isPlayWatching / isLivePageWatching / PisPlayerWatching。
+ * 命令表里那些 `changeQuality`、`setQualityList`、`initShowQualityBox` 是
+ * **播放器发给父页面的通知**，反着发过去 `typeof this[cmd] !== "function"`，被直接丢弃。
+ *
+ * 实测记录（直接加载 embed 页，同源可查 DOM）：
+ *   初始                    .quality_box → display:none
+ *   Pload + showQualityBox  .quality_box → display:none
+ *   → 官方在 embed 模式下用 CSS 关死，跨域改不了。
+ *
+ * 所以 SOOP 保持官方播放器 + auto 画质。想上 1080p 只能走自建流，
+ * 但自建流的 aid 时效太短（进播放器后分片被 abort、报「网络连接失败」），
+ * 要做得先解决「分片失败时自动重新走四步鉴权换新 aid」。
+ */
 const status = ref("");
 const err = ref("");
 const playing = ref(false);
@@ -467,6 +489,7 @@ watch(
 onBeforeUnmount(() => {
   destroy();
   if (dmRaf) cancelAnimationFrame(dmRaf);
+  if (soopTimer) window.clearInterval(soopTimer);
   if (tick) window.clearInterval(tick);
   if (hideTimer) window.clearTimeout(hideTimer);
   window.removeEventListener("keydown", onKey);
@@ -564,16 +587,20 @@ defineExpose({ reload });
     <!-- YouTube：官方 iframe 播放器（自带控件，自己处理 PO token） -->
     <iframe
       v-if="isEmbed"
+      ref="embedRef"
       class="embed"
       :src="embedSrc"
-      title="YouTube 播放器"
+      :title="props.platform === 'soop' ? 'SOOP 播放器' : 'YouTube 播放器'"
       frameborder="0"
       allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+      @load="onEmbedLoad"
     ></iframe>
 
     <!-- YouTube 走官方 iframe、没有自定义控制栏，把弹幕设置和全屏放在画面右下角。
          全屏要用我们自己的（对 .player 全屏），这样弹幕层才还在。 -->
-    <div v-if="isEmbed" class="embed-tools">
+    <!-- SOOP 不要这条工具条：弹幕没接（SOOP 弹幕通道未实现），
+         全屏官方播放器自带，整条隐藏 -->
+    <div v-if="isEmbed && props.platform !== 'soop'" class="embed-tools">
       <DmSet />
       <button
         class="ico"

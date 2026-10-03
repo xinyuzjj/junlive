@@ -67,8 +67,17 @@ rquickjs = { version = "0.9", default-features = false, features = ["loader", "m
 # 构建时报 `Could not find directory of OpenSSL installation` 直接失败。
 # 加上 vendored 让它在编译期用 NDK 的 clang 自带一份 OpenSSL（不需要本地装任何东西）。
 # 桌面端和 iOS 不受影响（Windows 用 schannel、macOS/iOS 用 Security.framework）。
+#
+# rquickjs-sys 只带了常见桌面目标的预生成绑定，**没有 aarch64-linux-android**，
+# 不加 bindgen 会报 `couldn't find file .../bindings/aarch64-linux-android.rs`。
+# 所以 Android 上开 bindgen 现场生成（CI 里要装 libclang + clang）。
 [target.'cfg(target_os = "android")'.dependencies]
 openssl = { version = "0.10", features = ["vendored"] }
+rquickjs = { version = "0.9", default-features = false, features = [
+  "loader",
+  "macro",
+  "bindgen",
+] }
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
