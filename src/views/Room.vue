@@ -93,9 +93,9 @@ onMounted(async () => {
   }
 
   // 弹幕（YouTube 也走自建通道：live_chat 长轮询，能飞屏）
-  // 例外：SOOP 切成「官方播放页」时不接 —— 官方页面自带聊天区，
-  // 我们的弹幕层又被 iframe 挡着，接了两边都别扭。
-  if (props.platform === "soop" && isEmbed.value) return;
+  // SOOP 官方播放器模式下也接 —— 弹幕层是浮在 iframe 外面的独立覆盖层
+  // （`pointer-events: none`，不挡官方控件的点击），和「视频由谁渲染」无关，
+  // 跟 YouTube 官方 embed + 自建弹幕是同一个做法。
   try {
     unlisten = await listen<DanmakuMsg>("danmaku", (e) => {
       msgs.value.push(e.payload);
