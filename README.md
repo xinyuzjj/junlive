@@ -340,8 +340,25 @@ Tauri 2 本身支持 Android / iOS，但**这不是把桌面版打包一下就�
 
 | 平台 | 状态 | 说明 |
 |---|---|---|
-| **Android** | ✅ **APK 已能构建** | CI 交叉编译链已逐项打通。产物为 **debug + 免签名** APK，只能侧载安装 |
-| **iOS** | 🔧 打通中 | 需要 macOS + Xcode；且**没有签名证书只能出未签名产物**，装到真机要 Apple 开发者账号（$99/年） |
+| **Android** | ✅ **APK 已能构建** | CI 交叉编译链已逐项打通，产物 54 MB。为 **debug + 免签名** APK，只能侧载安装 |
+| **iOS** | ⚠️ 真机目标可编译，模拟器受阻 | Rust 代码能为 `aarch64-apple-ios`（真机目标）编过；**模拟器目标编不过**，卡在 `rquickjs-sys`（见下）。且**没有签名证书只能出未签名产物**，装到真机要 Apple 开发者账号（$99/年） |
+
+<details>
+<summary><b>iOS 模拟器为什么编不过</b></summary>
+
+`rquickjs-sys` 把 Rust 的 target 名原样当 `--target` 交给 clang，
+而 clang 不认 `aarch64-apple-ios-sim` 这个写法（clang 用的是 `-simulator`），
+于是直接报 `error: version 'sim' in target triple 'aarch64-apple-ios-sim' is invalid`。
+
+关键是：**clang 遇到非法三元组会立刻终止**，所以在外部再补一个合法的 `--target`（我们试过
+`BINDGEN_EXTRA_CLANG_ARGS_*`）也救不回来；而该 crate 自带的预生成绑定里**没有任何 iOS 目标**，
+所以只能开 bindgen 现场生成。要彻底修好得给这个 crate 打补丁
+（vendored + `[patch.crates-io]` 改掉 build.rs 里那一行），或等上游修。
+
+真机目标（`aarch64-apple-ios`）的三元组 clang 是认的，所以 CI 里改成先做
+**真机目标的编译验证**，至少能证明 iOS 侧代码是能编的。
+
+</details>
 
 <details>
 <summary><b>已经处理掉的移动端特有障碍</b></summary>
@@ -350,7 +367,8 @@ Tauri 2 本身支持 Android / iOS，但**这不是把桌面版打包一下就�
 - Cookie 存在 `%APPDATA%` 之类的**桌面路径**上，移动端没有这些环境变量
 - YouTube 登录会开新窗口，而移动端只支持单个 webview
 - 抖音签名要跑 QuickJS（`rquickjs`），交叉编译到 Android / iOS 需要现场生成绑定（`bindgen`）：
-  Android 要喂 NDK 的 sysroot，iOS 要把 `aarch64-apple-ios-sim` 映射成 clang 认的 `arm64-apple-ios-simulator`
+  Android 要喂 NDK 的 sysroot；iOS 把 `aarch64-apple-ios-sim` 映射成 clang 认的
+  `arm64-apple-ios-simulator` 之后，仍被 crate 里硬编码的三元组挡住（见上）
 
 </details>
 
