@@ -172,6 +172,11 @@ jobs:
           grep -q 'cdylib' src-tauri/Cargo.toml || { echo "::error::crate-type 替换失败"; exit 1; }
           rm -f src-tauri/rust-toolchain.toml
 
+      # 必须先 init 生成 Android 工程，否则构建会报
+      # "Android Studio project directory .../src-tauri/gen/android doesn't exist"
+      - name: 生成 Android 工程
+        run: npx tauri android init --ci --skip-targets-install
+
       - name: 构建 APK
         run: npx tauri android build --apk --debug --target aarch64
 

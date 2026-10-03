@@ -2166,7 +2166,7 @@ dependencies = [
 
 [[package]]
 name = "junlive"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "axum",
  "base64 0.22.1",
