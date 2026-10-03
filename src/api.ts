@@ -226,3 +226,18 @@ export function thumbUrl(platform: string, cover: string, w = 400): string {
 
 /** 打开 YouTube 登录窗口；登录成功后后端会自动保存 Cookie */
 export const youtubeLogin = () => invoke<string>("youtube_login");
+
+/**
+ * 安卓沉浸式全屏：隐藏系统状态栏与导航栏。
+ *
+ * 为什么需要它：tao 在安卓上把 `set_fullscreen` 实现成了**空函数**
+ * （tao-0.37.1/src/platform_impl/android/mod.rs:823 只打了句
+ * "Cannot set fullscreen on Android"），Tauri 2 也没有任何隐藏系统栏的 API。
+ * 所以这一层必须自己经 JNI 调 Android 的 WindowInsetsController。
+ *
+ * 返回值里的 `applied` 如实反映有没有生效（老系统会 false），
+ * 不要当成一定成功。
+ */
+export async function androidImmersive(enable: boolean): Promise<{ applied: boolean; detail: string }> {
+  return invoke<{ applied: boolean; detail: string }>("android_immersive", { enable });
+}

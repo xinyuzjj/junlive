@@ -10,6 +10,7 @@ mod flv_renew;
 mod model;
 mod net;
 mod platforms;
+mod immersive;
 mod proxy;
 
 use model::*;
@@ -172,6 +173,7 @@ async fn set_youtube_cookie(cookie: Option<String>) {
     net::set_yt_cookie(cookie);
 }
 
+use immersive::android_immersive;
 
 
 /// 让**官方 iframe 播放器**（Twitch / YouTube）走代理。
@@ -246,6 +248,7 @@ pub fn run() {
             search_rooms,
             get_room,
             set_stream_renew,
+            android_immersive,
             get_proxy_setting,
             set_proxy_setting,
             get_proxy_port,

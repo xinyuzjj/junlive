@@ -29,6 +29,7 @@ import {
   avatarUrl,
   getRoom,
   setStreamRenew,
+  androidImmersive,
   startDanmaku,
   stopDanmaku,
   thumbUrl,
@@ -161,12 +162,23 @@ async function toggleFull() {
       /* 忽略 */
     }
   }
-  // Tauri 窗口全屏：安卓上只有窗口真全屏才会隐藏系统状态栏/导航栏并去掉白边。
-  // 光加 CSS 类改不了系统栏。浏览器预览时 getCurrentWindow() 会抛错 —— 包 try/catch。
+  // Tauri 窗口全屏：让窗口铺满整个屏幕，去掉白边。
+  //
+  // ⚠️ 但这**不够** —— tao 在安卓上把 set_fullscreen 实现成了空函数
+  // （tao-0.37.1/src/platform_impl/android/mod.rs:823 只有一句
+  // "Cannot set fullscreen on Android"），Tauri 2 也没有隐藏系统栏的 API。
+  // 所以要另外经 JNI 调 Android 的 WindowInsetsController（见 immersive.rs）。
   try {
     await getCurrentWindow().setFullscreen(full.value);
   } catch {
     /* 浏览器预览 / 无窗口 API 时忽略，CSS 全屏仍然生效 */
+  }
+  // 隐藏系统状态栏与导航栏。applied=false（如老系统、非安卓）时也不影响，
+  // 上面已经改成 window 全屏，CSS 全屏同样生效。
+  try {
+    await androidImmersive(full.value);
+  } catch {
+    /* 命令不可用时忽略 */
   }
   syncOrient();
 }
@@ -485,6 +497,25 @@ async function onRefresh() {
   }
 }
 
+/**
+ * 缓冲状态。
+ *
+ * 直播里最让人以为「卡死」的就是这段：封面已经垫在下面了，但播放器
+ * 还在转、画面没出来。没有明确反馈时用户只会盯着一张不动的图。
+ * 靠 video 的 waiting/stalled 进、playing/canplay/seeking 出。
+ */
+const buffering = ref(false);
+let bufTimer: number | null = null;
+
+function onBufStart() {
+  buffering.value = true;
+}
+function onBufEnd() {
+  // 延后一点再关：seeking 与 playing 常常连着来，立刻关会闪一下。
+  if (bufTimer) window.clearTimeout(bufTimer);
+  bufTimer = window.setTimeout(() => (buffering.value = false), 350);
+}
+
 /** 房间解析失败时的「重试」：重新拉一次 getRoom（初始 error 态没有重试入口是缺口） */
 async function retryRoom() {
   loading.value = true;
@@ -551,6 +582,14 @@ onMounted(async () => {
     loading.value = false;
   }
 
+  // 缓冲事件：靠 DOM 冒泡绑在舞台上，不改 Player.vue 的 props/emits
+  // （那是全平台共用的接口，动它会牵连 PC 端）。
+  const el = stageRef.value;
+  if (el) {
+    for (const ev of ["waiting", "stalled"]) el.addEventListener(ev, onBufStart);
+    for (const ev of ["playing", "canplay", "seeking"]) el.addEventListener(ev, onBufEnd);
+  }
+
   // 弹幕：监听只注册一次，连接失败可由「重试」按钮重新触发
   try {
     unlisten = await listen<DanmakuMsg>("danmaku", (e) => onDanmaku(e.payload));
@@ -587,11 +626,21 @@ onBeforeUnmount(() => {
   } catch {
     /* 浏览器预览忽略 */
   }
+  // 系统栏同理：退出房间必须把状态栏/导航栏还回来，
+  // 否则退回首页后整个界面少一条系统栏，看着像没铺满。
+  androidImmersive(false).catch(() => {});
 });
 </script>
 
 <template>
-  <div class="mr" :class="[full, landscape, `fit-${fit}`]">
+  <!--
+    类名必须写成对象形式 `{ full: full }`。
+    ⚠️ 之前写的是数组 `:class="[full, landscape, \`fit-${fit}\`]"` ——
+    Vue 2/3 的**数组 class 里的 `true` 会被直接忽略**（不是渲染成 "true"，
+    也不是渲染成 "full"），所以全屏时类名只有 `mr fit-contain`，
+    CSS 里的 `.mr.full` 永远匹配不上，全屏样式（fixed 铺满、隐藏侧栏）全不生效。
+    -->
+  <div class="mr" :class="{ full: full, landscape: landscape, [`fit-${fit}`]: true }">
     <!-- 播放器：竖屏固定 16:9 贴顶；横屏时在左栏铺满高度。
          手势（单击/双击/亮度/音量）挂在这一层，只作用于画面区域。 -->
     <div
@@ -622,6 +671,16 @@ onBeforeUnmount(() => {
         @refresh="onRefresh"
       />
       <div v-if="loading" class="mr-veil">加载中…</div>
+      <!--
+        缓冲指示：直播最容易让人以为卡死的就是这一段 —— 封面已经垫在下面了，
+        但播放器还在转、没出画面。用户看到的是「一张图卡着不动」，
+        分不清是在加载还是死了。这里给一个明确的「缓冲中」+ 转圈。
+        判定靠 video 元素的事件：waiting/stalled 进去，playing/seeking 出来。
+      -->
+      <div v-else-if="buffering" class="mr-veil buffering">
+        <span class="mr-spin"></span>
+        <span>缓冲中…</span>
+      </div>
       <!-- 房间解析失败 / 未开播：给可点的「重试」，不再只有一行红字 -->
       <div v-else-if="error" class="mr-veil err">
         <div class="mr-veil-t">{{ error }}</div>
@@ -908,6 +967,22 @@ onBeforeUnmount(() => {
   padding: 0 20px;
   text-align: center;
 }
+/* 缓冲：转圈 + 文案，让「还在加载」和「卡死了」在视觉上分得开 */
+.mr-spin {
+  width: 22px;
+  height: 22px;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: mr-spin 0.8s linear infinite;
+}
+@keyframes mr-spin {
+  to { transform: rotate(360deg); }
+}
+.mr-veil.buffering {
+  flex-direction: column;
+  gap: 8px;
+}
 .mr-veil.err {
   color: #ffb4b4;
 }
@@ -932,21 +1007,21 @@ onBeforeUnmount(() => {
   background: rgba(0, 0, 0, 0.7);
 }
 .mr-ov-l {
-  top: calc(6px + env(safe-area-inset-top, 0));
-  left: 6px;
+  top: calc(10px + env(safe-area-inset-top, 0));
+  left: 10px;
   font-size: 26px;
 }
 .mr-ov-r {
-  top: calc(6px + env(safe-area-inset-top, 0));
-  right: 6px;
+  top: calc(10px + env(safe-area-inset-top, 0));
+  right: 10px;
 }
 .mr-ov-bl {
-  left: 6px;
-  bottom: 6px;
+  left: 10px;
+  bottom: 10px;
 }
 .mr-ov-br {
-  right: 6px;
-  bottom: 6px;
+  right: 10px;
+  bottom: 10px;
 }
 
 /* 侧栏：竖屏时在画面下方上下排列 */
