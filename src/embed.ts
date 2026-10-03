@@ -17,7 +17,7 @@
  * 代价：官方播放器自带控件，我们的画质/线路选择器对它无效；
  * 它自带的全屏是 iframe 内部全屏，弹幕层会被盖住，所以全屏要用我们自己的按钮。
  */
-import { soopMode, soopOfficialSrc } from "./soopMode";
+import { soopEmbedSrc, soopMode, soopOfficialSrc } from "./soopMode";
 
 export const EMBED_PLATFORMS = ["youtube", "twitch"];
 
@@ -27,7 +27,8 @@ export const EMBED_PLATFORMS = ["youtube", "twitch"];
  */
 export function isEmbedPlatform(p?: string): boolean {
   if (!p) return false;
-  if (p === "soop") return soopMode.value === "official";
+  // SOOP：只有「自建流」不走 iframe，另外两种官方方式都走
+  if (p === "soop") return soopMode.value !== "native";
   return EMBED_PLATFORMS.includes(p);
 }
 
@@ -53,10 +54,10 @@ export function embedSrc(platform: string, roomId: string): string {
     );
   }
   if (platform === "soop") {
-    // 官方播放页 —— 用**普通页**（不带 /embed）。
-    // /embed 画质选择器被官方 CSS 关掉、实测锁 640x360；
-    // 普通页画质菜单是开的，能选到 1080p，代价是带出 SOOP 自己的导航栏。
-    return soopOfficialSrc(roomId);
+    // 两种官方方式二选一：
+    //  - embed   官方播放器控件（干净、铺满，但画质框被官方注释掉了）
+    //  - official 官方完整播放页（画质可调，但带整套官网界面）
+    return soopMode.value === "embed" ? soopEmbedSrc(roomId) : soopOfficialSrc(roomId);
   }
   // YouTube：必须用 www.youtube.com 而不是 youtube-nocookie.com ——
   // nocookie 是另一个域名，登录窗拿到的 Cookie 在 youtube.com 上，带不过去，

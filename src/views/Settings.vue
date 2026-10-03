@@ -183,22 +183,24 @@ async function clearCookies() {
       <div class="card-title">
         SOOP 播放方式
         <span class="chip" :class="{ on: soopMode === 'native' }">
-          {{ soopMode === "native" ? "自建流" : "官方播放页" }}
+          {{ soopMode === "native" ? "自建流" : soopMode === "embed" ? "官方播放器" : "官方完整页" }}
         </span>
       </div>
       <p class="hint">
-        SOOP 是唯一一个「官方播放器和自建流各有取舍」的平台，所以交给你选。<br />
-        <b>自建流</b>：画质有 1080p / 720p / 540p / 360p 四档可选，弹幕由本软件接入，界面完全可控。<br />
-        <b>官方播放页</b>：用 SOOP 自己的播放器，画质菜单是官方的（能选 1080p），
-        但会带出 SOOP 的顶部导航栏和频道/聊天区，且画面区域的点击会被官方页面接管。
+        SOOP 官方没给一个「又干净、画质又能调」的选项，三种方式各有取舍，所以交给你选。<br />
+        <b>自建流</b>：画质四档可选（1080p / 720p / 540p / 360p），弹幕由本软件接入，界面完全可控。<br />
+        <b>官方播放器</b>：SOOP 的 embed 播放器，最干净 —— 铺满画面、没有官网导航和聊天区。
+        但官方把画质调节删掉了（模板里直接注释掉），画质由官方自动决定。<br />
+        <b>官方完整播放页</b>：画质菜单是官方的、能选到 1080p，代价是会带出 SOOP 整套网站界面。
       </p>
       <div class="slider">
         <label>
           <span class="k">播放方式</span>
           <span class="colwrap">
             <select v-model="soopMode">
-              <option value="native">自建流（推荐，有弹幕）</option>
-              <option value="official">官方播放页（画质交给官方）</option>
+              <option value="native">自建流（画质可调 + 弹幕）</option>
+              <option value="embed">官方播放器（最干净，画质官方定）</option>
+              <option value="official">官方完整播放页（画质可调，带官网界面）</option>
             </select>
             <span class="pv">切换后重新进入 SOOP 房间生效</span>
           </span>
