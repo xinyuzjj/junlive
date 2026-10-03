@@ -218,14 +218,59 @@ GNU 工具链下还有一个坑：`crate-type` 不能带 `cdylib`，否则链接
 
 ---
 
+## 作者
+
+<table>
+<tr>
+<td width="72"><img src="https://github.com/xinyuzjj.png" width="64" alt="峻峻尼"></td>
+<td>
+
+**峻峻尼**（junjunni） —— JunLive 作者 · 全栈 / 直播协议逆向
+
+| 联系方式 | |
+|---|---|
+| GitHub | [@xinyuzjj](https://github.com/xinyuzjj) |
+| 邮箱 | 1105002234@qq.com |
+| QQ | 1105002234 |
+
+有问题、想提需求，或者想聊直播协议逆向，欢迎开 issue 或直接联系。
+
+</td>
+</tr>
+</table>
+
+---
+
 ## 致谢
 
 接口抓取思路参考了这些项目：
 
-- [Multistream](https://github.com/ilanzgx/multistream) —— 桌面形态与「交给官方播放器」的思路
-- [DTV](https://github.com/chen-zeong/DTV) —— 关注列表在线状态的持久化做法、窗口全屏
-- [zrfme-live](https://github.com/shaoyouvip/zrfme-live) 及其致谢列表
-  （lemon-live / pure_live / Simple Live / douyinLive）
+### [Multistream](https://github.com/ilanzgx/multistream) · 桌面形态参考
+
+单窗口聚合多个平台的形态，以及「流从官方播放器加载」的思路
+（README 原话：*Streams load from the official players*）。
+本项目的 YouTube / Twitch / SOOP 三个平台直接沿用了这个做法。
+
+### [DTV](https://github.com/chen-zeong/DTV) · 关注列表与全屏
+
+关注列表的在线状态持久化做法（把 `liveStatus` 存进关注记录、进页面立刻排好序，
+而不是每次临时拉）、窗口全屏（CSS fullscreen 而不是 Fullscreen API）、
+以及抖音房间列表的 `a_bogus` 签名实现。
+
+### [zrfme-live](https://github.com/shaoyouvip/zrfme-live) · 接口抓取思路索引
+
+这是一个接口抓取思路的索引项目，它的致谢列表指向了四个更上游的实现：
+**lemon-live**、**pure_live**、**Simple Live**、**douyinLive**。
+
+本项目从这条线索里拿到了几个关键实现：
+
+- **斗鱼** `getEncryption` + `auth` 签名 —— 移植自 streamlink 的斗鱼插件
+- **B站** WBI 签名（`MIXIN_KEY_ENC_TAB` → `w_rid`）
+- **虎牙** `anti_code` 签名（`seqid` / `wsSecret` / `rotl32_by8`）
+- **抖音** X-Bogus 签名（用 QuickJS 跑混淆 JS）与 `a_bogus`（纯 Rust 实现）
+
+各平台的弹幕协议也都是顺着这些项目摸出来的：斗鱼自有 TCP 协议、虎牙自有 WS 协议
+（uid 必须取房间页的 `lp`）、B站 `getDanmuInfo`、抖音 WS + `ttwid` 握手。
 
 ---
 

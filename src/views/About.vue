@@ -10,10 +10,21 @@
  */
 import { openUrl } from "@tauri-apps/plugin-opener";
 
-const VERSION = "0.1.0";
+const VERSION = "0.1.1";
 const REPO = "https://github.com/xinyuzjj/junlive";
 const RELEASES = `${REPO}/releases/latest`;
 const ISSUES = `${REPO}/issues`;
+
+/** 作者 */
+const AUTHOR = {
+  name: "峻峻尼",
+  alias: "junjunni",
+  role: "JunLive 作者 · 全栈 / 直播协议逆向",
+  gh: "https://github.com/xinyuzjj",
+  ghName: "@xinyuzjj",
+  mail: "1105002234@qq.com",
+  qq: "1105002234",
+};
 
 function open(u: string) {
   openUrl(u).catch(() => window.open(u, "_blank"));
@@ -50,9 +61,27 @@ const STACK = [
 
 /** 致谢 */
 const CREDITS = [
-  ["Multistream", "桌面形态与「交给官方播放器」的思路", "https://github.com/ilanzgx/multistream"],
-  ["DTV", "关注列表在线状态持久化、窗口全屏", "https://github.com/chen-zeong/DTV"],
-  ["zrfme-live", "接口抓取思路索引", "https://github.com/shaoyouvip/zrfme-live"],
+  {
+    name: "Multistream",
+    url: "https://github.com/ilanzgx/multistream",
+    desc: "桌面形态参考",
+    detail:
+      "单窗口聚合多个平台的形态，以及「流从官方播放器加载」的思路（README 原话：Streams load from the official players）。本项目的 YouTube / Twitch / SOOP 三个平台直接沿用了这个做法。",
+  },
+  {
+    name: "DTV",
+    url: "https://github.com/chen-zeong/DTV",
+    desc: "关注列表与全屏",
+    detail:
+      "关注列表的在线状态持久化做法（把 liveStatus 存进关注记录、进页面立刻排好序，而不是每次临时拉）、窗口全屏（CSS fullscreen 而不是 Fullscreen API）、以及抖音房间列表的 a_bogus 签名实现。",
+  },
+  {
+    name: "zrfme-live",
+    url: "https://github.com/shaoyouvip/zrfme-live",
+    desc: "接口抓取思路索引（展开）",
+    detail:
+      "这是一个接口抓取思路的索引项目，它的致谢列表指向了四个更上游的实现：lemon-live、pure_live、Simple Live、douyinLive。本项目从这条线索里拿到了几个关键实现——斗鱼的 getEncryption + auth 签名（移植自 streamlink 的斗鱼插件）、B站的 WBI 签名、虎牙的 anti_code 签名、抖音的 X-Bogus 签名（用 QuickJS 跑混淆 JS）。各平台的弹幕协议（斗鱼自有 TCP、虎牙自有 WS、B站 getDanmuInfo、抖音 WS + ttwid）也都是顺着这些项目摸出来的。",
+  },
 ];
 </script>
 
@@ -134,13 +163,52 @@ const CREDITS = [
       </table>
     </section>
 
+    <!-- 作者 -->
+    <section class="card">
+      <div class="card-title">作者</div>
+      <div class="who">
+        <div class="ava">峻</div>
+        <div>
+          <div class="nm">
+            {{ AUTHOR.name }}
+            <span class="alias">{{ AUTHOR.alias }}</span>
+          </div>
+          <div class="role">{{ AUTHOR.role }}</div>
+        </div>
+      </div>
+      <div class="contact">
+        <div class="crow">
+          <span class="ck">GitHub</span>
+          <a @click="open(AUTHOR.gh)">{{ AUTHOR.ghName }}</a>
+        </div>
+        <div class="crow">
+          <span class="ck">邮箱</span>
+          <a @click="open('mailto:' + AUTHOR.mail)">{{ AUTHOR.mail }}</a>
+        </div>
+        <div class="crow">
+          <span class="ck">QQ</span>
+          <span class="cv">{{ AUTHOR.qq }}</span>
+        </div>
+        <div class="crow">
+          <span class="ck">项目</span>
+          <a @click="open(REPO)">xinyuzjj/junlive</a>
+        </div>
+      </div>
+      <p class="hint" style="margin: 12px 0 0">
+        有问题、想提需求或者想聊直播协议逆向，直接 GitHub 开 issue 或发邮件都行。
+      </p>
+    </section>
+
     <!-- 致谢 -->
     <section class="card">
       <div class="card-title">致谢</div>
       <p class="hint">接口抓取思路参考了这些项目：</p>
-      <div v-for="[n, d, u] in CREDITS" :key="n" class="credit">
-        <a @click="open(u)">{{ n }}</a>
-        <span class="cd">{{ d }}</span>
+      <div v-for="c in CREDITS" :key="c.name" class="credit">
+        <div class="chead">
+          <a @click="open(c.url)">{{ c.name }}</a>
+          <span class="tag">{{ c.desc }}</span>
+        </div>
+        <div class="cd">{{ c.detail }}</div>
       </div>
     </section>
 
@@ -279,25 +347,103 @@ h1 {
   line-height: 1.7;
 }
 
-/* 致谢 */
-.credit {
+/* 作者 */
+.who {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.ava {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  flex: none;
+  background: var(--brand-soft);
+  color: var(--brand);
+  font-size: 20px;
+  font-weight: 700;
+}
+.nm {
+  font-size: 15px;
+  font-weight: 600;
+}
+.alias {
+  color: var(--fg-dim);
+  font-size: 12px;
+  font-weight: 400;
+  margin-left: 6px;
+}
+.role {
+  color: var(--fg-dim);
+  font-size: 12.5px;
+  margin-top: 3px;
+}
+.contact {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 6px 16px;
+}
+.crow {
   display: flex;
   align-items: baseline;
   gap: 10px;
-  padding: 6px 0;
   font-size: 12.5px;
 }
-.credit a {
+.ck {
+  color: var(--fg-dim);
+  width: 46px;
+  flex: none;
+}
+.crow a,
+.cv {
+  color: var(--fg-2);
+}
+.crow a {
+  color: var(--accent);
+  cursor: pointer;
+}
+.crow a:hover {
+  text-decoration: underline;
+}
+
+/* 致谢 */
+.credit {
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+.credit:first-of-type {
+  border-top: none;
+  padding-top: 4px;
+}
+.chead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 5px;
+}
+.chead a {
   color: var(--accent);
   cursor: pointer;
   font-weight: 600;
-  flex: none;
+  font-size: 13px;
 }
-.credit a:hover {
+.chead a:hover {
   text-decoration: underline;
+}
+.tag {
+  font-size: 11px;
+  color: var(--fg-dim);
+  background: var(--chip);
+  padding: 1px 8px;
+  border-radius: 9px;
 }
 .cd {
   color: var(--fg-dim);
+  font-size: 12.5px;
+  line-height: 1.8;
 }
 
 .disclaim {
