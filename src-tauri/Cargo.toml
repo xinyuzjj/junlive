@@ -79,6 +79,16 @@ rquickjs = { version = "0.9", default-features = false, features = [
   "bindgen",
 ] }
 
+# iOS 同理：rquickjs-sys 也没有 aarch64-apple-ios / aarch64-apple-ios-sim 的预生成绑定，
+# 不开 bindgen 会报 `couldn't find file .../bindings/aarch64-apple-ios-sim.rs`。
+# macOS 上 Xcode 自带 libclang，CI 不用额外装（只补个 LIBCLANG_PATH 兜底）。
+[target.'cfg(target_os = "ios")'.dependencies]
+rquickjs = { version = "0.9", default-features = false, features = [
+  "loader",
+  "macro",
+  "bindgen",
+] }
+
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]

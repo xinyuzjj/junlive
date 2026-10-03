@@ -72,6 +72,28 @@ jobs:
           echo "LIBCLANG_PATH=$(llvm-config --libdir 2>/dev/null || echo /usr/lib/llvm-18/lib)" >> "$GITHUB_ENV"
           ls /usr/lib/llvm-*/lib/libclang.so* 2>/dev/null | head -3 || true
 
+      # 光装 libclang 不够：bindgen 交叉编译时默认用**宿主机的** clang 和内建头，
+      # 于是 rquickjs-sys 构建时报
+      #   /usr/include/limits.h:26:10: fatal error: 'bits/libc-header-start.h' file not found
+      # （那是 glibc 的头，Android 目标根本不该去用）。
+      # 必须显式把 NDK 的 sysroot 和目标三元组喂给 bindgen。
+      - name: 让 bindgen 使用 NDK 的 sysroot
+        run: |
+          SYSROOT="$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
+          if [ ! -d "$SYSROOT" ]; then echo "::error::NDK sysroot 不存在: $SYSROOT"; exit 1; fi
+          for pair in \
+            aarch64-linux-android:aarch64-linux-android21 \
+            armv7-linux-androideabi:armv7a-linux-androideabi21 \
+            i686-linux-android:i686-linux-android21 \
+            x86_64-linux-android:x86_64-linux-android21
+          do
+            crate_t="${pair%%:*}"; clang_t="${pair##*:}"
+            var="BINDGEN_EXTRA_CLANG_ARGS_${crate_t//-/_}"
+            echo "${var}=--sysroot=${SYSROOT} --target=${clang_t}" >> "$GITHUB_ENV"
+            echo "${var} = --sysroot=${SYSROOT} --target=${clang_t}"
+          done
+          ls "$SYSROOT/usr/include/bits/libc-header-start.h" && echo "sysroot 头文件就位 ✅"
+
       - name: 安装 Rust（含 Android 目标）
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -140,6 +162,20 @@ jobs:
 
       - name: 安装 iOS 构建依赖
         run: brew install xcodegen
+
+      # iOS 也要开 rquickjs 的 bindgen（见 Cargo.toml 的 target_os="ios" 段），
+      # 而 bindgen 依赖 libclang。macOS runner 上它随 Xcode 一起来，
+      # 但 clang-sys 不总能自动找到，显式指一下最稳。
+      - name: 定位 libclang（给 bindgen 用）
+        run: |
+          XCODE_DEV="$(xcode-select -p)"
+          LLVM_LIB="$(dirname "$(find "$XCODE_DEV/Toolchains/XcodeDefault.xctoolchain/usr/lib" -name 'libclang.dylib' 2>/dev/null | head -1)")"
+          if [ -z "$LLVM_LIB" ] || [ "$LLVM_LIB" = "." ]; then
+            LLVM_LIB="$XCODE_DEV/Toolchains/XcodeDefault.xctoolchain/usr/lib"
+          fi
+          echo "LIBCLANG_PATH=$LLVM_LIB" >> "$GITHUB_ENV"
+          echo "LIBCLANG_PATH = $LLVM_LIB"
+          ls "$LLVM_LIB"/libclang*.dylib 2>/dev/null | head -3 || echo "（没列到，靠 Xcode 默认查找）"
 
       - name: 安装前端依赖
         run: npm ci
