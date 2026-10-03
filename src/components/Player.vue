@@ -34,6 +34,9 @@ const embedSrc = computed(() =>
 
 const wrapRef = ref<HTMLDivElement | null>(null);
 const videoRef = ref<HTMLVideoElement | null>(null);
+/** 官方 iframe 播放器（YouTube / Twitch / SOOP）。用来判断「浏览器全屏的元素是不是它」——
+ *  SOOP 官方播放器自带全屏按钮，进去以后要同步关掉我们自己的窗口全屏。 */
+const embedRef = ref<HTMLIFrameElement | null>(null);
 
 /**
  * SOOP 画质（**结论：官方 embed 调不了，已实测**）
@@ -473,10 +476,24 @@ function onPause() {
   showCtrl.value = true;
 }
 
+/**
+ * SOOP 官方播放器自带全屏按钮（我们在它的 iframe 上开了 allowfullscreen）。
+ * 用户在 iframe 里按全屏时，父页的 `document.fullscreenElement` 会变成那个 iframe，
+ * 而它内部的按键（含 ESC）由**浏览器**处理、不会冒泡到我们这边 ——
+ * 所以这条同步很关键：一旦官方全屏生效就把我们自己的窗口全屏关掉，
+ * 免得两层全屏叠着打架，退出时也退不干净。
+ */
+function onFsChange() {
+  if (document.fullscreenElement && document.fullscreenElement === embedRef.value) {
+    cssFull.value = false;
+  }
+}
+
 onMounted(() => {
   attach(props.play);
   tick = window.setInterval(onProgress, 500);
   window.addEventListener("keydown", onKey);
+  document.addEventListener("fullscreenchange", onFsChange);
   poke();
 });
 watch(
@@ -492,6 +509,7 @@ onBeforeUnmount(() => {
   if (tick) window.clearInterval(tick);
   if (hideTimer) window.clearTimeout(hideTimer);
   window.removeEventListener("keydown", onKey);
+  document.removeEventListener("fullscreenchange", onFsChange);
 });
 
 
@@ -579,7 +597,12 @@ defineExpose({ reload });
   <div
     ref="wrapRef"
     class="player"
-    :class="{ hide: !showCtrl, 'css-full': cssFull, 'embed-mode': isEmbed }"
+    :class="{
+      hide: !showCtrl,
+      'css-full': cssFull,
+      'embed-mode': isEmbed,
+      'soop-embed': isEmbed && props.platform === 'soop',
+    }"
     @mousemove="poke"
     @click="poke"
   >
@@ -592,6 +615,7 @@ defineExpose({ reload });
       :title="props.platform === 'soop' ? 'SOOP 播放器' : 'YouTube 播放器'"
       frameborder="0"
       allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+      :allowfullscreen="props.platform === 'soop'"
     ></iframe>
 
     <!-- YouTube 走官方 iframe、没有自定义控制栏，把弹幕设置和全屏放在画面右下角。
@@ -820,6 +844,33 @@ video {
   transition: opacity 0.2s;
 }
 .player.css-full.hide .embed-tools {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ===== SOOP 官方播放器（只影响 soop，不动 YouTube / Twitch）=====
+   它的控件栏常驻底部，顶部还有一条频道信息栏，只有右上角那块是空的。
+   所以按钮放右上角，且**不占位**（iframe 铺满 100%），
+   鼠标不动时跟着控制栏一起淡出，免得一直压在频道信息上。
+   放在 .css-full 规则之后，保证全屏时位置不变。 */
+.player.soop-embed .embed {
+  height: 100%;
+}
+.player.soop-embed .dm-layer {
+  bottom: 0;
+}
+.player.soop-embed .embed-tools {
+  position: absolute;
+  top: 8px;
+  right: 44px;
+  height: auto;
+  border: 0;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.35);
+  padding: 2px 4px;
+  transition: opacity 0.2s;
+}
+.player.soop-embed.hide .embed-tools {
   opacity: 0;
   pointer-events: none;
 }
