@@ -52,6 +52,18 @@ jobs:
           echo "NDK = $NDK"
           ls "$NDK" | head -5
 
+          # openssl 的 vendored 构建（见 Cargo.toml）会在 Makefile 里直接调
+          # `<target>-ranlib`，但 NDK 只提供 llvm-ranlib，导致
+          # `aarch64-linux-android-ranlib: not found` → make install_dev 失败。
+          # 补一套软链，并把 NDK 的 bin 加进 PATH。
+          NDKBIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          echo "$NDKBIN" >> "$GITHUB_PATH"
+          for t in aarch64-linux-android armv7a-linux-androideabi i686-linux-android x86_64-linux-android; do
+            sudo ln -sf "$NDKBIN/llvm-ranlib" "/usr/local/bin/$t-ranlib"
+            sudo ln -sf "$NDKBIN/llvm-ar" "/usr/local/bin/$t-ar"
+          done
+          aarch64-linux-android-ranlib --version | head -1
+
       - name: 安装 Rust（含 Android 目标）
         uses: dtolnay/rust-toolchain@stable
         with:

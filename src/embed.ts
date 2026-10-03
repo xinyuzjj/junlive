@@ -8,18 +8,17 @@
  *   自己拿到的 hlsManifestUrl 能拉列表、但分片一律 403（表现是一直缓冲）。
  * - **twitch**：自己拉 HLS 时清晰度会随 ABR 一直变，且 usher 的 token 有时效，
  *   容易出网络错误。官方播放器自己管清晰度选择、鉴权和重连。
+ * - **soop**：自建流虽然能拿到 1080p（`--test room soop <id>` 实测四档齐全，
+ *   分片 200 OK / 2.2MB），但进播放器后分片会被 abort、currentTime 卡住，
+ *   报「网络连接失败」—— SOOP 的 aid 时效太短，hls.js 后续刷新拿不到。
+ *   所以还是用官方播放器。代价是它的画质选择器被官方关掉了
+ *   （embed HTML 里 `<!-- 화질선택 임베디드는 미노출 -->`），画质走 auto，
+ *   实测会落在 640x360 SD 档。
  *
  * 代价：官方播放器自带控件，我们的画质/线路选择器对它无效；
  * 它自带的全屏是 iframe 内部全屏，弹幕层会被盖住，所以全屏要用我们自己的按钮。
- *
- * **SOOP 不在这个列表里**（曾经在，已撤回）：官方 embed 的 HTML 里明确写着
- * `<!-- 화질선택 임베디드는 미노출 -->`（画质选择在 embed 里不显示），
- * 画质被锁死在 auto —— 实测在 WebView 里直接掉到 640x360 SD 档
- * （分片 URL `/640x360/xxx-common-sd-hls_*.TS`），而且菜单点不到。
- * 自建流反而能拿到 1080p/720p/540p/360p 四档（`--test room soop <id>` 实测），
- * 交给我们的 hls.js + 清晰度锁定（≤1080p 取最高）就能上 1080p。
  */
-export const EMBED_PLATFORMS = ["youtube", "twitch"];
+export const EMBED_PLATFORMS = ["youtube", "twitch", "soop"];
 
 export function isEmbedPlatform(p?: string): boolean {
   return !!p && EMBED_PLATFORMS.includes(p);
@@ -47,9 +46,10 @@ export function embedSrc(platform: string, roomId: string): string {
     );
   }
   if (platform === "soop") {
-    // SOOP 已经不走 embed 了（画质被官方锁死，见上面的说明）。
-    // 保留这个分支只是防御：正常不会再走到这里。
-    return "";
+    // SOOP 的 embed 不用带 bno（广播号），只给主播 ID 就行。
+    // 自建流能拿到 1080p，但 aid 时效太短 —— 进播放器后分片会被 abort、
+    // 报「网络连接失败」，所以还是交给官方播放器（画质走 auto）。
+    return `https://play.sooplive.com/${encodeURIComponent(roomId)}/embed`;
   }
   // YouTube：必须用 www.youtube.com 而不是 youtube-nocookie.com ——
   // nocookie 是另一个域名，登录窗拿到的 Cookie 在 youtube.com 上，带不过去，
