@@ -63,6 +63,13 @@ flate2 = "1"
 # 用 QuickJS 在本地算。不开 bindgen 特性——它需要 libclang。
 rquickjs = { version = "0.9", default-features = false, features = ["loader", "macro"] }
 
+# Android 上没有系统 OpenSSL，但 native-tls 会拖进 openssl-sys，
+# 构建时报 `Could not find directory of OpenSSL installation` 直接失败。
+# 加上 vendored 让它在编译期用 NDK 的 clang 自带一份 OpenSSL（不需要本地装任何东西）。
+# 桌面端和 iOS 不受影响（Windows 用 schannel、macOS/iOS 用 Security.framework）。
+[target.'cfg(target_os = "android")'.dependencies]
+openssl = { version = "0.10", features = ["vendored"] }
+
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]
