@@ -25,7 +25,6 @@ import {
 } from "../api";
 import { store } from "../store";
 import { soopMode } from "../soopMode";
-import { twitchMode } from "../twitchMode";
 import {
   DM_COLOR_MODES,
   dmArea,
@@ -38,7 +37,7 @@ import {
   dmSpeed,
 } from "../dmSettings";
 
-const VERSION = "1.1.6";
+const VERSION = "1.2.1";
 
 const router = useRouter();
 
@@ -204,38 +203,6 @@ async function clearCookies() {
               <option value="official">官方完整播放页（画质可调，带官网界面）</option>
             </select>
             <span class="tip">切换后重新进入 SOOP 房间生效</span>
-          </span>
-        </label>
-      </div>
-    </section>
-
-    <!-- 3. Twitch 播放方式 -->
-    <section class="card">
-      <div class="card-title">
-        Twitch 播放方式
-        <span class="chip" :class="{ on: twitchMode === 'official' }">
-          {{ twitchMode === "official" ? "官方播放器" : "自建流" }}
-        </span>
-      </div>
-      <p class="hint">
-        Twitch 两种方式各有取舍，所以交给你选。<br />
-        <b>官方播放器</b>：更流畅。官方播放器自己管清晰度选择、鉴权与重连，
-        usher 的 token 过期了它内部会自己换新，不用我们操心。<br />
-        代价：Twitch 对 embed 有画质上限，<b>实测锁在 640×360</b> —— 这是 Twitch 的政策，改不了；
-        官方自带控件，我们的画质选择器对它无效。<br />
-        <b>自建流</b>：画质能到 <b>1920×1080</b>，弹幕与画质选择器都是我们自己的，界面完全可控。<br />
-        代价：usher 的 token 有时效（约 1 小时），长时间看需要重新进房间拿一次；
-        ABR 切档偶尔会卡一下。
-      </p>
-      <div class="slider">
-        <label>
-          <span class="k">播放方式</span>
-          <span class="colwrap">
-            <select v-model="twitchMode">
-              <option value="official">官方播放器（更流畅，画质锁 640×360）</option>
-              <option value="native">自建流（画质 1080p + 弹幕可控）</option>
-            </select>
-            <span class="tip">切换后重新进入 Twitch 房间生效</span>
           </span>
         </label>
       </div>

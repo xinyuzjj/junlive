@@ -22,7 +22,6 @@
  * 它自带的全屏是 iframe 内部全屏，弹幕层会被盖住，所以全屏要用我们自己的按钮。
  */
 import { soopEmbedSrc, soopMode, soopOfficialSrc } from "./soopMode";
-import { twitchMode } from "./twitchMode";
 
 export const EMBED_PLATFORMS = ["youtube"];
 
@@ -35,8 +34,11 @@ export function isEmbedPlatform(p?: string): boolean {
   if (!p) return false;
   // SOOP：只有「自建流」不走 iframe，另外两种官方方式都走
   if (p === "soop") return soopMode.value !== "native";
-  // Twitch：用户可自选官方播放器（流畅）或自建流（1080p）
-  if (p === "twitch") return twitchMode.value === "official";
+  // Twitch：一律自建流。官方播放器（player.twitch.tv iframe）已删除 ——
+  // Twitch 校验 parent 必须与顶层页面真实 host 一致，而 Tauri 打包后顶层是
+  // tauri.localhost，对不上就整页拒绝（iframe 建好但 0 条网络请求）。
+  // 详见 src/twitchMode.ts 的注释。
+  if (p === "twitch") return false;
   return EMBED_PLATFORMS.includes(p);
 }
 

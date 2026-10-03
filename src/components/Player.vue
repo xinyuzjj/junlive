@@ -103,6 +103,13 @@ const currentLabel = computed(() => {
   const i = g.list.findIndex((p) => p.url === props.play?.url);
   return g.list.length > 1 ? `${g.name} · 线路${i + 1}` : g.name;
 });
+/** 清晰度按钮上的文字：当前实际在播的档位 */
+const levelLabel = computed(() => {
+  // 手动选了档位就显示那档；自动模式显示 ABR 当前实际在播的档。
+  const idx = lockedLevel >= 0 ? lockedLevel : curLevel;
+  const l = hlsLevels.value.find((x) => x.index === idx);
+  return l ? `${l.height}p` : "清晰度";
+});
 const res = ref("");
 const kbps = ref("");
 
@@ -113,9 +120,17 @@ let tick: number | undefined;
 let retried = 0;
 /** 锁定的档位下标，-1 表示不锁（交给 ABR） */
 let lockedLevel = -1;
+/** 用户锁定的高度（如 720），比下标可靠 —— levels 顺序会变，高度不会。
+ *  -1 表示没锁。 */
+let lockedHeight = -1;
 
 /**
- * 把清晰度锁到一档固定值，别再自动变。
+ * 清晰度档位处理：
+ *   - 用户选了一档 → 把该档当作**上限**（autoLevelCapping），
+ *     ABR 在上限以下自由选，带宽不足会自己降档，不会卡住。
+ *   - 没选 → 完全交给 ABR。
+ *   - 刻意**不锁最高档**：锁最高会强行拉 1080p，
+ *     Twitch 走代理抖动大（实测 84ms~1891ms），大分片更容易抽干缓冲。
  *
  * Twitch / YouTube 给的是「主播放列表」，内部含多档码率，hls.js 默认随带宽
  * 自动切换（ABR），表现就是清晰度一直变。给 currentLevel 赋 >=0 的值会关掉自动切换。
@@ -126,20 +141,85 @@ let lockedLevel = -1;
  * 只设 currentLevel 不够：直播的主列表会周期性刷新，hls.js 重新解析后 ABR 会「复活」。
  * 所以同时设 autoLevelCapping 兜住上限，并在 LEVEL_SWITCHED 里发现漂了就拉回来。
  */
+/** hls.js 里的可用档位，供 UI 展示（{index, height, bitrate}） */
+const hlsLevels = ref<{ index: number; height: number; bitrate: number }[]>([]);
+/** 用户选的档位下标；-1 = 自动（交给 ABR） */
+const wantLevel = ref(-1);
+/** 自动模式下 hls.js 实际选中的档位，UI 用来显示当前清晰度 */
+let curLevel = -1;
+const showLevels = ref(false);
+
+/** 把清晰度锁到一档固定值，别再自动变 */
 function lockLevel(h: Hls) {
+  // 先把可用档位暴露给 UI（每次主列表刷新都会变）
+  hlsLevels.value = (h.levels ?? [])
+    .map((lv, i) => ({ index: i, height: lv.height || 0, bitrate: lv.bitrate || 0 }))
+    .filter((x) => x.height > 0)
+    .sort((a, b) => b.height - a.height);
+
   if (!h.levels || h.levels.length <= 1) {
     lockedLevel = -1;
     return;
   }
-  const CAP = 1080;
-  let best = h.levels.length - 1;
-  const within = h.levels
-    .map((lv, i) => ({ i, height: lv.height || 0 }))
-    .filter((x) => x.height > 0 && x.height <= CAP);
-  if (within.length) best = within[within.length - 1].i;
-  lockedLevel = best;
-  h.autoLevelCapping = best;
-  h.currentLevel = best;
+
+  // 用户明确选过档位 → 钉死那一档，不让 ABR 乱跳。
+  // 直播主列表会周期刷新，levels 的顺序/下标都可能变，
+  // 所以优先按**高度**找回用户选的那一档，找不到才退回下标。
+  if (lockedHeight > 0) {
+    const byHeight = h.levels.findIndex((lv) => (lv.height || 0) === lockedHeight);
+    if (byHeight >= 0) {
+      pinLevel(h, byHeight);
+      wantLevel.value = byHeight;
+      return;
+    }
+  }
+  if (wantLevel.value >= 0 && h.levels[wantLevel.value]) {
+    pinLevel(h, wantLevel.value);
+    return;
+  }
+
+  // 没选过就交给 hls.js 的 ABR 自己判断带宽选档。
+  // 刻意**不锁最高档**：之前锁 ≤1080p 会强行拉 1080p，
+  // 而 Twitch 走代理时抖动大（实测 84ms~1891ms），大码率分片更容易
+  // 把缓冲抽干 → 一卡一卡。交给 ABR 降档反而更流畅。
+  lockedLevel = -1;
+  h.autoLevelCapping = -1;
+}
+
+/**
+ * 把某一档「钉死」：关掉自动切档，并反复把 currentLevel 拉回来。
+ *
+ * 为什么必须反复拉：直播的主播放列表会周期性刷新，hls.js 每次重新解析
+ * 都会让 ABR「复活」——表现就是用户明明选了 720p，过一会儿又自己跳到 1080p，
+ * 或者带宽波动时被降到 480p。只在 pickLevel 里设一次 currentLevel 是不够的。
+ */
+function pinLevel(h: Hls, i: number) {
+  if (!h.levels?.[i]) return;
+  lockedLevel = i;
+  lockedHeight = h.levels[i].height || -1;
+  // autoLevelCapping = i 的语义是「不许超过第 i 档」，
+  // 也就是把 i 当**上限**用：ABR 仍可在这个上限以下自由选，
+  // 带宽不足时会自动降到 480p/360p，而不是卡住不动。
+  //
+  // 之前设 h.currentLevel = i 是「锁死那一档」—— 带宽不够时它只会
+  // 反复重试同一个大分片，表现就是一直「缓冲中」。上限模式没有这个问题。
+  h.autoLevelCapping = i;
+  // 关键：不要设 currentLevel，设了就等于锁死，ABR 不会动了。
+}
+
+/** 用户点了某一档清晰度（i = -1 表示「自动」，交给 ABR） */
+function pickLevel(i: number) {
+  wantLevel.value = i;
+  showLevels.value = false;
+  if (!hls) return;
+  if (i < 0) {
+    // 「自动」：解除上限，交回给 hls.js 的 ABR
+    lockedLevel = -1;
+    lockedHeight = -1;
+    hls.autoLevelCapping = -1;
+    return;
+  }
+  pinLevel(hls, i);
 }
 
 /** 直播流没有有限时长 */
@@ -415,15 +495,28 @@ function attach(p: PlayUrl | null) {
   }
 
   if (Hls.isSupported()) {
+    // 直播流：不要开 lowLatencyMode。
+    // 低延迟模式靠「减小缓冲 + 快速追帧」换取延迟，网络一抖就露馅 ——
+    // 实测 Twitch 自建流会一卡一卡。观看直播不需要那点延迟差，
+    // 宁可多几秒延迟也要播放流畅，所以用默认的普通模式。
+    // 缓冲给到很大：直播是持续的小分片请求，只要有一两次延迟尖峰
+    // （实测本地代理节点抖动可达 84ms → 1891ms），小缓冲就会被瞬间耗尽，
+    // 于是播放器反复「缓冲中」。缓冲越大，越能扛住尖峰。
+    // 代价是进入房间后要等十几秒才起播，且直播延迟多十几秒 —— 换取不卡。
     const h = new Hls({
-      lowLatencyMode: true,
-      liveSyncDurationCount: 3,
-      maxBufferLength: 15,
-      maxMaxBufferLength: 30,
-      // 限制回看缓冲，否则同样会越积越多
+      // 落后直播点多少个分片就往上追。调大 = 更愿意先攒缓冲再追，
+      // 减少「缓冲空了猛跳」这种卡顿。
+      liveSyncDurationCount: 8,
+      maxBufferLength: 60,
+      maxMaxBufferLength: 120,
       backBufferLength: 30,
-      manifestLoadingMaxRetry: 4,
-      manifestLoadingTimeOut: 20000,
+      manifestLoadingMaxRetry: 6,
+      manifestLoadingTimeOut: 30000,
+      // 分片失败时的重试放宽：代理抖动造成的失败应该重试而不是放弃。
+      fragLoadingMaxRetry: 10,
+      fragLoadingRetryDelay: 800,
+      // 缓冲快空时不要立刻 panic，而是先尝试补一段再决定。
+      startFragPrefetch: true,
       enableWorker: true,
     });
     h.loadSource(p.proxy);
@@ -441,8 +534,15 @@ function attach(p: PlayUrl | null) {
       }
       // 直播的主列表会周期性刷新，hls.js 重新解析后 ABR 会「复活」，
       // 表现就是清晰度又开始自己变。这里发现漂了就拉回来。
-      if (lockedLevel >= 0 && h.autoLevelEnabled && data.level !== lockedLevel) {
-        h.currentLevel = lockedLevel;
+      // 只有「用户手动选过档位」才纠正漂移。
+      // lockedLevel === -1 表示交给 ABR，此时 data.level 变化是正常的
+      // （带宽不足自动降档反而更流畅），不能拉回来。
+      // 上限模式（autoLevelCapping = lockedLevel）下不干预，
+      // 只记录当前实际档位供 UI 显示 —— 让 ABR 在上限内自由升降，
+      // 这样带宽不足时它会降档而不是卡住。
+      if (lockedLevel < 0) {
+        // 自动模式下记录当前实际档位，UI 上要显示 1080p/720p 这些。
+        curLevel = data.level;
       }
     });
     h.on(
@@ -772,6 +872,38 @@ defineExpose({ reload });
         </button>
 
         <DmSet />
+
+        <!--
+          清晰度选择（HLS 档位）。
+          Twitch 这类平台只有一条线路、但流内部含多档码率，
+          所以上面的「画质 / 线路」按钮不会显示（qualities.length === 1），
+          清晰度必须在这里选。Twitch 走代理时抖动大，
+          1080p 容易卡，用户可以手动降到 720p 换取流畅。
+        -->
+        <div v-if="hlsLevels.length > 1" class="lines">
+          <button class="line-btn" title="切换清晰度上限（带宽不足会自动降档）"
+              @click="showLevels = !showLevels">
+            <span class="lb-ico">⇅</span>
+            <span class="lb-txt ellipsis">{{ levelLabel }}</span>
+          </button>
+          <div v-if="showLevels" class="line-menu">
+            <button :class="{ on: wantLevel === -1 }" @click="pickLevel(-1)">
+              自动（不设上限）
+              <span v-if="wantLevel === -1" class="ck">✓</span>
+            </button>
+            <button
+              v-for="l in hlsLevels"
+              :key="l.index"
+              :class="{ on: (lockedLevel >= 0 ? lockedLevel : curLevel) === l.index }"
+              @click="pickLevel(l.index)"
+            >
+              {{ l.height }}p
+              <span v-if="l.bitrate" class="lm-kbps">{{ Math.round(l.bitrate / 1000) }}k</span>
+              <span v-if="l.index === wantLevel" class="lm-hint">上限</span>
+              <span v-if="(lockedLevel >= 0 ? lockedLevel : curLevel) === l.index" class="ck">✓</span>
+            </button>
+          </div>
+        </div>
 
         <div v-if="qualities.length" class="lines">
           <button class="line-btn" title="切换画质 / 线路" @click="showLines = !showLines">
@@ -1177,6 +1309,22 @@ video {
 }
 .lb-txt {
   max-width: 150px;
+}
+/* 清晰度菜单里的 kbps 标注与对勾 */
+.lm-hint {
+  margin-left: 6px;
+  font-size: 10px;
+  color: var(--brand);
+  opacity: 0.75;
+}
+.lm-kbps {
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--fg-dim);
+}
+.ck {
+  margin-left: auto;
+  color: var(--brand);
 }
 .line-menu {
   position: absolute;

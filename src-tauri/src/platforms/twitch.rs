@@ -191,8 +191,16 @@ async fn play_urls(login: &str) -> Result<Vec<PlayUrl>, String> {
         return Err("拿不到播放令牌（可能需要代理，或该频道受地区限制）".into());
     }
 
+    // usher 参数说明（每个都影响实际体验，别随便加）：
+    // - supported_codecs=av1,h264 → **去掉 av1**。
+    //   Twitch 会优先给 AV1 流的，而 WebView2/Wry 的 MediaSource 对 AV1
+    //   解码支持很差：实测 Twitch 自建流只有 688 kbps 且一卡一卡，
+    //   1080p 该有 6000+ kbps。限定 h264 才会拿到正常的 H.264 源。
+    // - allow_source=true → 允许拿「源」画质（1080p 及以上）
+    // - fast_bread=true → 起播更快
+    // - transcode_mode=cross_version_2 → Twitch 官方播放器的转码策略
     let url = format!(
-        "https://usher.ttvnw.net/api/channel/hls/{login}.m3u8?allow_source=true&allow_audio_only=true&client_id={CID}&fast_bread=true&player_backend=mediaplayer&playlist_include_framerate=true&reassignments_supported=true&sig={}&supported_codecs=av1,h264&token={}&transcode_mode=cross_version_2",
+        "https://usher.ttvnw.net/api/channel/hls/{login}.m3u8?allow_source=true&allow_audio_only=true&client_id={CID}&fast_bread=true&player_backend=mediaplayer&playlist_include_framerate=true&reassignments_supported=true&sig={}&supported_codecs=h264&token={}&transcode_mode=cross_version_2",
         urlencoding::encode(sig),
         urlencoding::encode(token)
     );
