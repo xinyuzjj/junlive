@@ -77,15 +77,21 @@ jobs:
       - name: 安装前端依赖
         run: npm ci
 
-      # Tauri 移动端要求 crate-type 带 cdylib。
-      # 但本地 Windows GNU 工具链加了 cdylib 会链接失败
-      # （`export ordinal too large`），所以仓库里保持不带，
-      # 只在 CI 的移动端构建里临时补上。
-      - name: 打开 cdylib（移动端必需）
+      # 移动端要两处适配：
+      # 1) crate-type 必须带 cdylib（Tauri 移动端要求），但本地 Windows GNU
+      #    加了会链接失败（`export ordinal too large`），所以仓库里不带。
+      # 2) rust-toolchain.toml 把工具链钉在 stable-x86_64-pc-windows-gnu
+      #    （本地没 Windows SDK 才这么写）。光靠 RUSTUP_TOOLCHAIN 环境变量
+      #    不够 —— xcodebuild 的脚本阶段会拿到净化过的环境，rustup 找不到
+      #    Windows 工具链就报 `target tuple in channel name '...-gnu'`。
+      #    直接删掉文件最稳。
+      - name: 移动端构建适配（cdylib + 去掉 Windows 工具链固定）
         run: |
           sed -i 's/crate-type = \["staticlib", "rlib"\]/crate-type = ["staticlib", "cdylib", "rlib"]/' src-tauri/Cargo.toml
           grep -q 'cdylib' src-tauri/Cargo.toml || { echo "::error::crate-type 替换失败"; exit 1; }
+          rm -f src-tauri/rust-toolchain.toml
           grep -n 'crate-type' src-tauri/Cargo.toml
+          echo "rust-toolchain.toml 已移除"
 
       - name: 生成 Android 工程
         run: npx tauri android init --ci --skip-targets-install
@@ -130,12 +136,14 @@ jobs:
       - name: 安装前端依赖
         run: npm ci
 
-      # 同上：移动端需要 cdylib，仓库里为了本地 GNU 工具链没带
-      - name: 打开 cdylib（移动端必需）
+      # 同上：移动端要 cdylib，并且要删掉钉死 Windows 工具链的 rust-toolchain.toml
+      - name: 移动端构建适配（cdylib + 去掉 Windows 工具链固定）
         run: |
           sed -i '' 's/crate-type = \["staticlib", "rlib"\]/crate-type = ["staticlib", "cdylib", "rlib"]/' src-tauri/Cargo.toml
           grep -q 'cdylib' src-tauri/Cargo.toml || { echo "::error::crate-type 替换失败"; exit 1; }
+          rm -f src-tauri/rust-toolchain.toml
           grep -n 'crate-type' src-tauri/Cargo.toml
+          echo "rust-toolchain.toml 已移除"
 
       - name: 生成 iOS 工程
         run: npx tauri ios init --ci --skip-targets-install
