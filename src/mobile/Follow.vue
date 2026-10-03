@@ -3,14 +3,14 @@
  * 移动端关注页 —— 不复用 PC 版 src/views/Follow.vue。
  *
  * PC 版是多列网格 + 小按钮，靠鼠标操作；手机上那种密度点不准、也扫不动。
- * 移动版重做成「单列大行」：
+ * 移动版照 Simple Live 重做成「单列大行」：
  *   - 每行至少 56px 高（≥44px 触控热区），整行可点直接进直播间
- *   - 只保留一眼要看的信息：头像 / 主播名 / 平台 / 在线状态点 / 进入箭头
- *   - 删除走左滑手势（手机上比点小 ✕ 更顺手），滑够 60px 再弹一次确认
+ *   - 在线（品牌色点）在前、离线（灰点）在后 —— 排序在数据层做（见下方 sorted）
+ *   - 取消关注走行末图标按钮 + 确认弹窗；**不做左滑删除**
  * 数据层完全复用 store：关注记录、在线状态、导出/导入逻辑都和 PC 版同源，
  * 所以两端数据天然一致。
  */
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted } from "vue";
 import { useRouter } from "vue-router";
 import { avatarUrl, getRoom, type Room } from "../api";
 import { store, liveRank, type FollowItem } from "../store";
@@ -42,7 +42,11 @@ async function refreshStatus() {
 
 onMounted(refreshStatus);
 
-/** 在播最前、未知中间、未开播最后（与 PC 版一致） */
+/**
+ * 在线置顶：在播最前、未知中间、未开播最后。
+ * 排序照搬 store 里现成的 liveRank（与 PC 版 src/views/Follow.vue 调用方式一致），
+ * 不自己另写一套权重 —— 这是 Simple Live 在数据层 sort liveStatus 的同款做法。
+ */
 const sorted = computed(() =>
   [...store.follows].sort((a, b) => liveRank(a.live) - liveRank(b.live)),
 );
@@ -63,51 +67,40 @@ function initial(f: FollowItem) {
 }
 
 /**
- * 在线状态点的颜色（需求：绿=直播中 / 灰=未开播 / 黄=未知）。
- * 未知包含 UNKNOWN 和还没刷到的 undefined —— 不能误当成「在播」。
+ * 在线状态点的颜色。
+ * 只用设计变量（不硬编码色值，深色模式才能跟着主题一起变）：
+ *   在播 → --brand（品牌色，最醒目）
+ *   未开播 → --fg-dim（灰）
+ *   未知 → --border-2（更浅的中性色，避免被误当成在播）
  */
 function liveColor(f: FollowItem): string {
-  if (f.live === "LIVE") return "var(--ok, #00c853)";
-  if (f.live === "OFFLINE") return "var(--fg-mute, #c0c4cc)";
-  return "#f5a623";
+  if (f.live === "LIVE") return "var(--brand)";
+  if (f.live === "OFFLINE") return "var(--fg-dim)";
+  return "var(--border-2)";
+}
+
+/** 状态文案：Simple Live 明确写出「直播中 / 未开播」，比只有色点更清楚 */
+function liveText(f: FollowItem): string {
+  if (f.live === "LIVE") return "直播中";
+  if (f.live === "OFFLINE") return "未开播";
+  return "未知";
 }
 
 function open(platform: string, roomId: string) {
   router.push(`/room/${platform}/${encodeURIComponent(roomId)}`);
 }
 
-/* ---------------- 左滑删除 ---------------- */
+/* ---------------- 取消关注 ---------------- */
 /**
- * 用 touchstart/touchend 记起止点，算水平位移。
- * 加两道闸：左滑 > 60px，且水平位移明显大于垂直（>1.5 倍）——
- * 后者是为了不跟列表上下滚动抢手势，否则用户一滚就容易误删。
- * 删前 window.confirm 再确认一次，防手滑。
+ * 取消关注：行末图标按钮 + 二次确认。
+ *
+ * 为什么不用左滑（Simple Live 也没有左滑）：左滑手势会和列表纵向滚动抢事件，
+ * 手机上很容易误删；采用成熟做法，删除只走显式按钮。
+ * toggleFollow 对已关注项就是删除；这里只用 platform / room_id，
+ * 其余字段它不看，所以用类型断言最小化构造（与 PC 版调用方式一致）。
  */
-const touchStart = ref<{ x: number; y: number } | null>(null);
-
-function onTouchStart(e: TouchEvent) {
-  const t = e.touches[0];
-  if (!t) return;
-  touchStart.value = { x: t.clientX, y: t.clientY };
-}
-
-function onTouchEnd(e: TouchEvent, f: FollowItem) {
-  const s = touchStart.value;
-  touchStart.value = null;
-  if (!s) return;
-  const t = e.changedTouches[0];
-  if (!t) return;
-  const dx = t.clientX - s.x;
-  const dy = t.clientY - s.y;
-  if (dx < -60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
-    removeOne(f);
-  }
-}
-
-function removeOne(f: FollowItem) {
+function confirmRemove(f: FollowItem) {
   if (!window.confirm(`取消关注「${f.streamer || f.room_id}」？`)) return;
-  // toggleFollow 对已关注项就是删除；这里只需要 platform / room_id，
-  // 其余字段它不看，所以用类型断言最小化构造（与 PC 版调用方式一致）。
   store.toggleFollow({ platform: f.platform, room_id: f.room_id } as unknown as Room);
 }
 
@@ -179,7 +172,7 @@ function importJson() {
       <div>还没有关注任何主播 —— 在播放页点 ☆ 即可添加</div>
     </div>
 
-    <!-- 单列列表 -->
+    <!-- 单列列表（在线在前、离线在后，顺序来自 sorted） -->
     <div v-else class="mf-list">
       <div
         v-for="f in sorted"
@@ -187,8 +180,6 @@ function importJson() {
         class="mf-row"
         :class="{ off: f.live === 'OFFLINE' }"
         @click="open(f.platform, f.room_id)"
-        @touchstart.passive="onTouchStart"
-        @touchend.passive="onTouchEnd($event, f)"
       >
         <div class="mf-ava">
           <span class="mf-ini">{{ initial(f) }}</span>
@@ -204,15 +195,39 @@ function importJson() {
           <div class="mf-name ellipsis">{{ f.streamer || f.room_id }}</div>
           <div class="mf-sub">
             <span class="mf-live" :style="{ background: liveColor(f) }"></span>
+            <span class="mf-status">{{ liveText(f) }}</span>
+            <span class="mf-sep">·</span>
             {{ store.platformName(f.platform) }}
           </div>
         </div>
 
-        <span class="mf-arrow">›</span>
+        <!-- 行末取消关注按钮：热区 44×44，点击即弹确认（取消冒泡，不触发进房） -->
+        <button
+          class="mf-unfollow"
+          type="button"
+          title="取消关注"
+          aria-label="取消关注"
+          @click.stop="confirmRemove(f)"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            width="20"
+            height="20"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M4 7h16" />
+            <path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+            <path d="M6 7l1 12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-12" />
+            <path d="M10 11v6M14 11v6" />
+          </svg>
+        </button>
       </div>
     </div>
-
-    <div v-if="store.follows.length" class="mf-hint">左滑一行可取消关注</div>
   </div>
 </template>
 
@@ -291,13 +306,14 @@ function importJson() {
   align-items: center;
   gap: 12px;
   height: 60px;
-  padding: 0 16px;
+  /* 右侧留窄一点，把空间让给 44px 的取消按钮 */
+  padding: 0 8px 0 16px;
   background: var(--panel);
   border-bottom: 1px solid var(--border);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   transition: background 0.12s;
-  /* 禁掉横向文字选择，避免左滑时选中文字 */
+  /* 禁掉文字选中，避免点击/长按选中文字 */
   user-select: none;
 }
 .mf-row:active {
@@ -358,18 +374,36 @@ function importJson() {
   border-radius: 50%;
   flex: none;
 }
-
-.mf-arrow {
-  flex: none;
-  font-size: 20px;
-  color: var(--fg-mute, #c0c4cc);
-  padding-right: 2px;
+/* 状态文字比平台名更亮一点，突出「直播中 / 未开播」 */
+.mf-status {
+  color: var(--fg-2);
+}
+.mf-sep {
+  opacity: 0.5;
 }
 
-.mf-hint {
-  text-align: center;
-  font-size: 12px;
+/* 行末取消关注：44×44 热区，图标按钮，默认低调、按下变强调色 */
+.mf-unfollow {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 50%;
   color: var(--fg-dim);
-  padding: 16px 0 4px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.mf-unfollow:hover {
+  color: var(--accent);
+  background: var(--chip);
+}
+.mf-unfollow:active {
+  color: var(--accent);
+  background: var(--chip-hover);
 }
 </style>

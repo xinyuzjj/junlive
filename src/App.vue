@@ -17,9 +17,22 @@ const kw = ref("");
  * 所以窄屏整一套换成移动布局：底部标签栏 + 单列/两列卡片 + 播放页上下分层。
  * 820px 是平板竖屏的门槛。
  */
+/**
+ * 是不是移动端（手机/平板）。
+ *
+ * ⚠️ 这里踩过一个坑：最初只用 `innerWidth <= 820` 判断，
+ * 结果手机一横屏宽度变成 844，就**切回了 PC 界面** ——
+ * 用户看到的是「网页被横过来」，顶栏、平台标签、搜索框、右侧弹幕面板全回来了。
+ *
+ * 手机不会因为旋转就变成电脑。所以：
+ *   手机/平板  UA 说了算（横竖屏都是移动端界面）
+ *   桌面      保留「窗口拖窄 → 预览移动端界面」的能力
+ */
+const UA_MOBILE = /android|iphone|ipad|ipod/i.test(navigator.userAgent);
+
 const isMobile = ref(false);
 function syncViewport() {
-  isMobile.value = window.innerWidth <= 820;
+  isMobile.value = UA_MOBILE || window.innerWidth <= 820;
 }
 
 /** 底部标签栏的当前项 */

@@ -1,4 +1,4 @@
-import { reactive } from "vue";
+import { reactive, ref } from "vue";
 import type { PlatformInfo, Room } from "./api";
 
 export interface FollowItem {
@@ -26,6 +26,41 @@ export function liveRank(s?: FollowItem["live"]): number {
   return 2;
 }
 
+/** 三档主题：跟随系统 / 浅色 / 深色 —— 对齐 Simple Live 的三选做法（非两态开关） */
+export type ThemeMode = "system" | "light" | "dark";
+
+/** 主题新键与旧键（旧键待迁移） */
+const THEME_KEY = "junlive.theme";
+const LEGACY_DARK_KEY = "junlive.dark";
+
+/**
+ * 系统是否偏好深色。由 main.ts 的 matchMedia 监听器写入。
+ * 为什么用 ref 而不是每次现场读 window：theme="system" 时，系统切换要能
+ * 触发依赖 store.dark 的组件（顶栏按钮图标）重渲染，读 window 不会建立响应式依赖。
+ */
+export const systemPrefersDark = ref(false);
+
+/**
+ * 读取主题并完成旧键迁移（一次性）：
+ *   - junlive.theme 已是合法值 → 直接用
+ *   - 否则回退读旧键 junlive.dark："1" → dark，"0" → light
+ *   - 新旧都没有 → system（跟随系统，最不打扰）
+ * 结果立即写回新键、删掉旧键，之后不再依赖旧键。
+ */
+function loadTheme(): ThemeMode {
+  const v = localStorage.getItem(THEME_KEY);
+  let t: ThemeMode;
+  if (v === "system" || v === "light" || v === "dark") {
+    t = v;
+  } else {
+    const old = localStorage.getItem(LEGACY_DARK_KEY);
+    t = old === "1" ? "dark" : old === "0" ? "light" : "system";
+  }
+  localStorage.setItem(THEME_KEY, t);
+  localStorage.removeItem(LEGACY_DARK_KEY);
+  return t;
+}
+
 const FOLLOW_KEY = "junlive.follows";
 
 function loadFollows(): FollowItem[] {
@@ -43,20 +78,45 @@ export const store = reactive({
   follows: loadFollows(),
 
   /**
-   * 深色模式开关。
+   * 主题模式：跟随系统 / 浅色 / 深色。
    *
-   * 为什么把状态放在 store 而不是组件里：顶栏的切换按钮、启动时的主题应用、
+   * 为什么把状态放在 store 而不是组件里：顶栏按钮、启动时的主题应用、
    * 刷新后的恢复，三处都要读同一个值，放这里只有一份真相。
-   * 持久化键名固定为 junlive.dark，存 "1"/"0"（用 === "1" 判断，
-   * 避免老数据里出现字符串 "true"/"false" 时误判）。
+   * 持久化键 junlive.theme，启动时由 loadTheme() 完成旧键 junlive.dark 的迁移。
    * 注意：这里**只负责状态与持久化**，真正往 <html> 上挂 class 的动作交给
    * main.ts —— 保持 store 不直接碰 DOM，方便以后在别处复用。
    */
-  dark: localStorage.getItem("junlive.dark") === "1",
+  theme: loadTheme(),
 
+  /**
+   * 兼容旧调用：当前是否"实际"处于深色。
+   * Shell.vue 仍读 store.dark 决定按钮图标，此 getter 保证它无需改动即可工作：
+   * theme=system 时跟随系统偏好（systemPrefersDark 由 main.ts 维护，可响应式更新）。
+   */
+  get dark(): boolean {
+    if (this.theme === "dark") return true;
+    if (this.theme === "light") return false;
+    return systemPrefersDark.value;
+  },
+
+  /** 设置主题并持久化（切换立即由 main.ts 的 watch 应用到 <html>） */
+  setTheme(t: ThemeMode) {
+    this.theme = t;
+    localStorage.setItem(THEME_KEY, t);
+  },
+
+  /**
+   * 保留给 Shell.vue 顶栏按钮的旧入口，按 跟随系统 → 深色 → 浅色 → 循环。
+   * 绝不能删除：对方 agent 的 Shell.vue 仍调用 store.toggleDark()，删了构建会挂。
+   */
   toggleDark() {
-    this.dark = !this.dark;
-    localStorage.setItem("junlive.dark", this.dark ? "1" : "0");
+    const next: ThemeMode =
+      this.theme === "system"
+        ? "dark"
+        : this.theme === "dark"
+          ? "light"
+          : "system";
+    this.setTheme(next);
   },
 
   setPlatform(id: string) {

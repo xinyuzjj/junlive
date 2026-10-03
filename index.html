@@ -3,7 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      viewport-fit=cover 必须加：只有它生效时 env(safe-area-inset-*) 才会返回真实的
+      刘海/Home 指示条高度；缺了它底栏会被指示条压住（审查报告「严重」项）。
+    -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
     <title>JunLive</title>
   </head>
 

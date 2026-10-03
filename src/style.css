@@ -112,7 +112,9 @@ input::placeholder {
 }
 input:focus,
 select:focus {
-  background: #fff;
+  /* 这里原来写死了 #fff，深色模式下会变成白底浅字（--fg 是浅色），聚焦后看不清。
+     改用变量，跟随主题走。 */
+  background: var(--card);
   box-shadow: 0 0 0 2px var(--brand-soft), inset 0 0 0 1px var(--brand);
 }
 

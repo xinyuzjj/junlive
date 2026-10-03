@@ -2,47 +2,39 @@
 /**
  * 移动端首页 —— 独立实现，不复用 PC 的 Home.vue。
  *
- * 与 PC 版的差别（不是缩放，是两种设计）：
- *   分类   一级/二级分区都改成横向滑动条，不用 PC 那种换行的标签墙
- *   卡片   固定两列；PC 是 auto-fill 五列
- *   关注   不在这里显示（关注是底部标签栏里独立的一页）
- *   分页   滚到底自动加载，不用 PC 的「加载更多」按钮
+ * 布局对齐 Simple Live（见调研 B 节）：
+ *   顶部   只放「平台」横滑条（B 站 / 斗鱼 / 虎牙 / 抖音…），真分类搬到「分类」tab；
+ *           Simple Live 首页 AppBar 就是平台 TabBar，分类不在首页（调研 A2）。
+ *   卡片   列数 = floor(宽 / 200) 且**最少 2 列**（调研 B1）；封面**固定高 110、宽撑满、
+ *           object-fit:cover**（调研 B3，不是 16:9）；卡片只留 封面 + 在线人数 + 标题
+ *           + 主播名（调研 B2），砍掉平台圆点等装饰。
+ *   交互   滚到底自动加载、下拉刷新（沿用原实现）。
+ *   搜索   监听 route.query.q：有 q 调 searchRooms，清空恢复分类列表 ——
+ *           旧版漏了这条分支，导致移动端关键词搜索完全无效（审查报告「致命」项）。
  */
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { getCategories, getRooms, thumbUrl, type Category, type Room } from "../api";
+import { getCategories, getRooms, searchRooms, thumbUrl, type Room } from "../api";
 import { store } from "../store";
 
 const route = useRoute();
 const router = useRouter();
 
-const cats = ref<Category[]>([]);
-const sub = ref("");
 const rooms = ref<Room[]>([]);
 const page = ref(1);
 const loading = ref(false);
 const done = ref(false);
 const err = ref("");
 
-const curCat = ref("");
-
-const subs = computed(() => cats.value.find((c) => c.id === curCat.value)?.children ?? []);
-
-/** 数字格式化：手机屏窄，十万和千万要区别开 */
-/** 观看人数是字符串（各平台单位不一），统一转成「万」显示 */
-function fmt(raw: string | undefined): string {
-  const n = Number(raw || 0);
-  if (!n) return "";
-  if (n >= 10000) return (n / 10000).toFixed(1).replace(/\.0$/, "") + "万";
-  return String(n);
-}
+/** 当前搜索关键词；来自 route.query.q（与外壳 Shell.doSearch 的约定一致） */
+const keyword = ref("");
+/** 首页默认分区：后端 get_rooms 必须要一个分类 id，取该平台第一个分类 */
+const defaultCat = ref("");
 
 async function loadCats() {
   try {
-    cats.value = await getCategories(store.current);
-    curCat.value = cats.value[0]?.id ?? "";
-    sub.value = "";
-    await loadRooms(true);
+    const cs = await getCategories(store.current);
+    defaultCat.value = cs[0]?.id ?? "";
   } catch (e) {
     err.value = String(e);
   }
@@ -58,8 +50,10 @@ async function loadRooms(reset = false) {
     done.value = false;
   }
   try {
-    const cat = sub.value || curCat.value;
-    const r = await getRooms(store.current, cat, page.value);
+    // 有关键词走搜索，否则走默认分类浏览
+    const r = keyword.value
+      ? await searchRooms(store.current, keyword.value, page.value)
+      : await getRooms(store.current, defaultCat.value, page.value);
     const list = r.rooms ?? [];
     rooms.value = reset ? list : [...rooms.value, ...list];
     if (!list.length) done.value = true;
@@ -72,6 +66,23 @@ async function loadRooms(reset = false) {
   }
 }
 
+/** 切平台：清掉搜索态（关键词绑平台），重拉分类并回到列表 */
+async function onPlatform(id: string) {
+  if (id === store.current) return;
+  store.setPlatform(id);
+  // 先同步 keyword，再清路由，避免 route 监听器重复请求
+  keyword.value = "";
+  if (route.query.q) router.replace({ path: "/" });
+  await loadCats();
+  await loadRooms(true);
+}
+
+function clearSearch() {
+  keyword.value = "";
+  if (route.query.q) router.replace({ path: "/" });
+  void loadRooms(true);
+}
+
 function onScroll(e: Event) {
   const el = e.target as HTMLElement;
   if (el.scrollHeight - el.scrollTop - el.clientHeight < 300) {
@@ -80,25 +91,22 @@ function onScroll(e: Event) {
 }
 
 /* ---------------- 骨架屏 ----------------
- * 只覆盖「首屏还没拿到任何数据」这一种情况：
- *   继续翻页时列表已经在屏上了，这时候再把内容抽掉换成灰块反而是倒退。
+ * 只覆盖「首屏还没拿到任何数据」这一种情况：翻页时列表已在屏上，抽掉内容反而倒退。
  */
 const showSkeleton = computed(() => loading.value && rooms.value.length === 0);
 
 /* ---------------- 下拉刷新 ----------------
- * 手机上「到顶再往下拉 = 刷新」是肌肉记忆，不做的话用户会觉得界面卡死了。
- * 关键点：只在 scrollTop<=0（已经在顶部）时才接管触摸；一旦手指改成上滑，
- * 立刻放弃接管、交还给浏览器滚动 —— 这样正常滚动完全不受影响。
+ * 手机上「到顶再往下拉 = 刷新」是肌肉记忆。关键点：只在 scrollTop<=0 时才接管触摸；
+ * 手指一改成上滑立刻放弃接管、交还浏览器滚动 —— 正常滚动完全不受影响。
  */
-const PULL_TRIGGER = 60; // 触发刷新所需的下拉距离（px）
-const pullY = ref(0); // 当前下拉位移，用来把提示条「撑」出来
-const pulling = ref(false); // 是否处于下拉手势中
-const refreshing = ref(false); // 是否正在刷新
+const PULL_TRIGGER = 60;
+const pullY = ref(0);
+const pulling = ref(false);
+const refreshing = ref(false);
 let touchStartY = 0;
 
 function onTouchStart(e: TouchEvent) {
   const el = e.currentTarget as HTMLElement;
-  // 不在顶部、或正在刷新 → 不接管，原生滚动照常
   if (el.scrollTop > 0 || refreshing.value) {
     touchStartY = 0;
     return;
@@ -114,7 +122,6 @@ function onTouchMove(e: TouchEvent) {
     // 阻尼 0.5：拉起来带点阻力，不至于一碰就弹到底
     pullY.value = Math.min(80, dy * 0.5);
   } else {
-    // 手指上滑 = 用户想看下面的内容，马上放弃下拉
     pulling.value = false;
     pullY.value = 0;
   }
@@ -136,51 +143,57 @@ async function onTouchEnd() {
 }
 
 function open(r: Room) {
-  router.push(`/room/${store.current}/${encodeURIComponent(r.room_id)}`);
+  router.push(`/room/${r.platform || store.current}/${encodeURIComponent(r.room_id)}`);
 }
 
 /**
- * 封面加载失败兜底：把破图藏起来，露出卡片的底色（--bg-3），
- * 避免手机上出现一排破图图标。失败多半是缩略图规则变了或图挂了，
- * 这里不做回退原图（原图更费流量，且多半一样挂）。
+ * 封面加载失败兜底：把破图藏起来，露出卡片底色，避免手机上出现一排破图图标。
+ * 不做回退原图（原图更费流量，且多半一样挂）。
  */
 function coverErr(e: Event) {
-  const el = e.target as HTMLImageElement;
-  el.style.visibility = "hidden";
+  (e.target as HTMLImageElement).style.visibility = "hidden";
 }
 
-onMounted(loadCats);
-watch(() => store.current, loadCats);
-watch(() => route.query.q, () => loadRooms(true));
+onMounted(async () => {
+  keyword.value = (route.query.q as string) || "";
+  await loadCats();
+  await loadRooms(true);
+});
+
+// 外壳搜索框把关键词塞进 ?q=：q 变了就重搜；清空（q 为空）则恢复分类列表
+watch(
+  () => route.query.q,
+  (q) => {
+    const nq = (q as string) || "";
+    if (nq === keyword.value) return; // 切平台时已同步，避免重复请求
+    keyword.value = nq;
+    void loadRooms(true);
+  },
+);
 </script>
 
 <template>
   <div class="mh">
-    <!-- 一级分类：横向滑动 -->
-    <div class="mh-cats">
+    <!-- 顶部：只放平台（对齐 Simple Live 首页 AppBar 的平台 TabBar） -->
+    <div class="mh-plats">
       <button
-        v-for="c in cats"
-        :key="c.id"
-        class="mh-chip"
-        :class="{ on: c.id === curCat }"
-        @click="curCat = c.id; sub = ''; loadRooms(true)"
+        v-for="p in store.platforms"
+        :key="p.id"
+        class="mh-plat"
+        :class="{ on: p.id === store.current }"
+        :style="p.id === store.current ? { color: p.color, borderColor: p.color } : {}"
+        @click="onPlatform(p.id)"
       >
-        {{ c.name }}
+        <span class="mh-plat-dot" :style="{ background: p.color }"></span>
+        {{ p.name }}
       </button>
+      <span v-if="!store.platforms.length" class="mh-plats-empty">正在加载平台…</span>
     </div>
 
-    <!-- 二级分区：横向滑动 -->
-    <div v-if="subs.length" class="mh-subs">
-      <button class="mh-sub" :class="{ on: !sub }" @click="sub = ''; loadRooms(true)">全部</button>
-      <button
-        v-for="s in subs"
-        :key="s.id"
-        class="mh-sub"
-        :class="{ on: s.id === sub }"
-        @click="sub = s.id; loadRooms(true)"
-      >
-        {{ s.name }}
-      </button>
+    <!-- 搜索态提示条：让用户知道当前在看搜索结果，并可一键清除 -->
+    <div v-if="keyword" class="mh-sbar">
+      <span class="mh-sbar-t">搜索「{{ keyword }}」</span>
+      <button class="mh-sbar-x" @click="clearSearch">清除</button>
     </div>
 
     <div
@@ -201,9 +214,9 @@ watch(() => route.query.q, () => loadRooms(true));
         <span>{{ refreshing ? "刷新中…" : pullY >= PULL_TRIGGER ? "松手刷新" : "下拉刷新" }}</span>
       </div>
 
-      <div v-if="err" class="mh-warn">{{ err }}</div>
+      <div v-if="err && rooms.length" class="mh-warn">{{ err }}</div>
 
-      <!-- 骨架屏：首屏没数据时用灰块占位，避免「白屏 + 一行文字」的坠落感 -->
+      <!-- 骨架屏：首屏没数据时用灰块占位 -->
       <div v-if="showSkeleton" class="mh-grid">
         <div v-for="i in 6" :key="i" class="mh-card">
           <div class="mh-thumb sk"></div>
@@ -212,10 +225,15 @@ watch(() => route.query.q, () => loadRooms(true));
         </div>
       </div>
 
-      <div v-else class="mh-grid">
-        <button v-for="r in rooms" :key="r.room_id" class="mh-card" @click="open(r)">
+      <div v-else-if="rooms.length" class="mh-grid">
+        <button
+          v-for="r in rooms"
+          :key="r.platform + r.room_id"
+          class="mh-card"
+          @click="open(r)"
+        >
           <div class="mh-thumb">
-            <!-- 封面走 thumbUrl：移动端只拉 400px 的缩略图，省流量省内存 -->
+            <!-- 封面走 thumbUrl：只拉 400px 缩略图，省流量省内存 -->
             <img
               :src="thumbUrl(store.current, r.cover, 400)"
               referrerpolicy="no-referrer"
@@ -223,21 +241,36 @@ watch(() => route.query.q, () => loadRooms(true));
               alt=""
               @error="coverErr"
             />
-            <span v-if="r.online" class="mh-hot">{{ fmt(r.online) }}</span>
+            <!--
+              在线人数直接显示后端返回的字符串（后端 fmt_num 已格式化成「1.2万」）。
+              旧版又 Number("1.2万") 一次 → NaN → 空串，留下一个无字黑胶囊（审查「致命」项）。
+              后端没给就整个胶囊不渲染。
+            -->
+            <span v-if="r.online" class="mh-hot">{{ r.online }}</span>
           </div>
-          <div class="mh-title">{{ r.title }}</div>
-          <div class="mh-sub-line">
-            <span class="mh-dot" :style="{ background: store.platformColor(store.current) }"></span>
-            {{ r.streamer }}
-          </div>
+          <!-- 标题只留一行（不是两行） -->
+          <div class="mh-title">{{ r.title || "（无标题）" }}</div>
+          <div class="mh-streamer">{{ r.streamer || "-" }}</div>
         </button>
+      </div>
+
+      <!-- 空态：区分「加载失败」「搜索无结果」「分区空」 -->
+      <div v-else-if="!loading" class="mh-empty">
+        <template v-if="err">
+          <div class="mh-empty-t">{{ err }}</div>
+          <button class="mh-clear" @click="loadRooms(true)">重试</button>
+        </template>
+        <template v-else-if="keyword">
+          <div class="mh-empty-t">没有搜到「{{ keyword }}」相关的直播间</div>
+          <button class="mh-clear" @click="clearSearch">清除搜索</button>
+        </template>
+        <template v-else>
+          <div class="mh-empty-t">这里暂时没有在播的直播间</div>
+        </template>
       </div>
 
       <div v-if="loading && rooms.length" class="mh-more">加载中…</div>
       <div v-else-if="done && rooms.length" class="mh-more">没有更多了</div>
-      <div v-else-if="!rooms.length && !err && !showSkeleton" class="mh-more">
-        这个分区暂时没有在播的直播间
-      </div>
     </div>
   </div>
 </template>
@@ -250,56 +283,82 @@ watch(() => route.query.q, () => loadRooms(true));
   overflow: hidden;
 }
 
-/* 横向滑动的标签条：手机上比换行的标签墙省一半高度 */
-.mh-cats,
-.mh-subs {
+/* ---------- 平台横滑条 ----------
+   对齐 Simple Live：首页顶部只有平台，没有二级分区（分区在「分类」tab）。
+   每个 chip 高 44，满足最小触控面积。 */
+.mh-plats {
   display: flex;
+  align-items: center;
   gap: 8px;
   overflow-x: auto;
   flex-shrink: 0;
   scrollbar-width: none;
-  padding: 10px 12px 6px;
+  padding: 8px 12px;
   background: var(--panel);
-}
-.mh-subs {
-  padding-top: 0;
-  padding-bottom: 10px;
   border-bottom: 1px solid var(--border);
 }
-.mh-cats::-webkit-scrollbar,
-.mh-subs::-webkit-scrollbar {
+.mh-plats::-webkit-scrollbar {
   display: none;
 }
-.mh-chip {
+.mh-plat {
   flex: 0 0 auto;
-  height: 34px;
-  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 44px;
+  padding: 0 16px;
   border-radius: 999px;
   border: 1px solid transparent;
   background: var(--chip);
   color: var(--fg-2);
   font-size: 14px;
+  white-space: nowrap;
 }
-.mh-chip.on {
+.mh-plat.on {
   background: var(--brand-soft);
-  color: var(--brand);
-  border-color: var(--brand);
   font-weight: 600;
 }
-.mh-sub {
-  flex: 0 0 auto;
-  height: 30px;
-  padding: 0 12px;
-  border-radius: 999px;
-  border: 0;
-  background: none;
-  color: var(--fg-dim);
+.mh-plat-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.mh-plats-empty {
   font-size: 13px;
+  color: var(--fg-dim);
+  padding: 0 4px;
 }
-.mh-sub.on {
-  color: var(--brand);
-  font-weight: 600;
-  background: var(--brand-soft);
+
+/* ---------- 搜索态提示条 ---------- */
+.mh-sbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-shrink: 0;
+  height: 56px;
+  padding: 0 12px 0 14px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+.mh-sbar-t {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--fg-2);
+}
+.mh-sbar-x {
+  flex: none;
+  height: 44px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid var(--border-2);
+  background: var(--chip);
+  color: var(--fg);
+  font-size: 13px;
 }
 
 .mh-scroll {
@@ -309,7 +368,7 @@ watch(() => route.query.q, () => loadRooms(true));
   -webkit-overflow-scrolling: touch;
   /* 关掉浏览器/WebView 自带的整页下拉刷新，否则会和我们的手势打架 */
   overscroll-behavior-y: contain;
-  padding: 10px 10px 16px;
+  padding: 8px 8px 16px;
 }
 
 /* 下拉刷新提示条：默认被 height:0 压扁，靠内联 height 撑开 */
@@ -324,7 +383,6 @@ watch(() => route.query.q, () => loadRooms(true));
   font-size: 12px;
   transition: height 0.15s;
 }
-/* 跟随手指拖动时不要过渡，否则提示条会「追不上」手指显得发飘 */
 .mh-pull.on {
   transition: none;
 }
@@ -341,27 +399,30 @@ watch(() => route.query.q, () => loadRooms(true));
   }
 }
 
-/* 固定两列：手机上三列标题就看不清了 */
+/* ---------- 卡片网格 ----------
+   列数 = floor(宽/200) 最少 2 列：用 auto-fill + minmax(170px, 1fr) 近似，
+   170 保证 390px 宽下仍是 2 列、不会塌成 1 列。间距 8px（调研 B1）。 */
 .mh-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 8px;
 }
 .mh-card {
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  border: 0;
+  gap: 4px;
+  border: 0; /* 无边框无阴影：Simple Live 的卡片风格 */
   background: none;
   padding: 0;
   text-align: left;
   color: var(--fg);
 }
+/* 封面：固定高 110、宽 100%、object-fit:cover（不是 16:9）—— 调研 B3 */
 .mh-thumb {
   position: relative;
   width: 100%;
-  aspect-ratio: 16 / 9;
-  border-radius: 8px;
+  height: 110px;
+  border-radius: 6px;
   overflow: hidden;
   background: var(--chip);
 }
@@ -371,41 +432,35 @@ watch(() => route.query.q, () => loadRooms(true));
   object-fit: cover;
   display: block;
 }
+/* 在线人数角标：用主题变量而非写死的黑色，深浅色下都读得清 */
 .mh-hot {
   position: absolute;
-  right: 5px;
-  top: 5px;
+  right: 4px;
+  top: 4px;
   padding: 1px 6px;
   border-radius: 4px;
-  background: rgba(0, 0, 0, 0.55);
-  color: #fff;
+  background: var(--fg);
+  color: var(--bg);
   font-size: 11px;
+  line-height: 1.5;
 }
+/* 标题一行截断 */
 .mh-title {
   font-size: 13px;
-  line-height: 1.35;
-  /* 两行截断，卡片高度才整齐 */
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.mh-sub-line {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 12px;
-  color: var(--fg-dim);
+  line-height: 1.4;
+  color: var(--fg);
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.mh-streamer {
+  font-size: 12px;
+  color: var(--fg-dim);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.mh-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
+
 .mh-warn {
   padding: 10px 12px;
   color: var(--accent);
@@ -418,9 +473,32 @@ watch(() => route.query.q, () => loadRooms(true));
   font-size: 13px;
 }
 
+/* ---------- 空态 ---------- */
+.mh-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 60px 20px;
+  text-align: center;
+}
+.mh-empty-t {
+  font-size: 14px;
+  color: var(--fg-2);
+  line-height: 1.6;
+}
+.mh-clear {
+  height: 44px;
+  padding: 0 20px;
+  border-radius: 999px;
+  border: 1px solid var(--border-2);
+  background: var(--chip);
+  color: var(--fg);
+  font-size: 14px;
+}
+
 /* ---------- 骨架屏 ----------
-   缩略图占位复用 .mh-thumb 的 16:9，标题占位两行（第二行短），与真实卡片
-   一一对齐，数据到位时不会跳版。shimmer 靠灰阶渐变横扫实现，不引动画库。 */
+   缩略图占位同样固定高 110，与真实卡片一一对齐，数据到位时不跳版。 */
 .mh-thumb.sk,
 .sk-line {
   background: linear-gradient(

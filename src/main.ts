@@ -1,7 +1,7 @@
 import { createApp, watch } from "vue";
 import App from "./App.vue";
 import router from "./router";
-import { store } from "./store";
+import { store, systemPrefersDark } from "./store";
 import "./style.css";
 
 /**
@@ -88,16 +88,41 @@ function injectDarkStyle() {
   document.head.appendChild(el);
 }
 
-/** 把 store.dark 同步到 <html> 的 class 上（立即生效） */
-function applyDark() {
-  document.documentElement.classList.toggle("dark", store.dark);
+/**
+ * 当前实际是否要用深色：
+ *   - "dark" / "light" 强制
+ *   - "system" 跟随系统偏好（systemPrefersDark 由下方 matchMedia 维护）
+ */
+function resolvedDark(): boolean {
+  if (store.theme === "dark") return true;
+  if (store.theme === "light") return false;
+  return systemPrefersDark.value;
 }
 
-injectDarkStyle();
-applyDark();
+/** 把实际主题同步到 <html> 的 class 上（立即生效） */
+function applyTheme() {
+  document.documentElement.classList.toggle("dark", resolvedDark());
+}
 
-// 切换开关后立即生效：watch 订阅 store.dark，顶栏按钮调用 toggleDark 时触发。
+/*
+ * 跟随系统：监听 prefers-color-scheme。
+ * 结果写进 store.systemPrefersDark，theme="system" 时下面的 watch 会重算并生效。
+ * 只在启动时注册一次（main.ts 模块只执行一次）。
+ */
+const mql = window.matchMedia("(prefers-color-scheme: dark)");
+systemPrefersDark.value = mql.matches;
+mql.addEventListener("change", (e) => {
+  systemPrefersDark.value = e.matches;
+});
+
+injectDarkStyle();
+applyTheme();
+
+// 立即生效的两条触发路径：
+//   1) 用户在三档里切换 → store.theme 变
+//   2) theme="system" 时系统偏好变 → systemPrefersDark 变
 // 用 watch 而非让 store 自己操作 DOM，是为了保持 store 与渲染环境解耦。
-watch(() => store.dark, applyDark);
+watch(() => store.theme, applyTheme);
+watch(systemPrefersDark, applyTheme);
 
 createApp(App).use(router).mount("#app");
