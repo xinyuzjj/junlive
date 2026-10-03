@@ -9,6 +9,35 @@
 
 ---
 
+## 界面预览
+
+七个平台各一套界面，顶栏一键切换；左边是关注列表（按在播状态排序）：
+
+<table>
+<tr>
+<td align="center"><b>哔哩哔哩</b><br><img src="docs/screenshot-bilibili.png" width="420"></td>
+<td align="center"><b>斗鱼</b><br><img src="docs/screenshot-douyu.png" width="420"></td>
+</tr>
+<tr>
+<td align="center"><b>虎牙</b><br><img src="docs/screenshot-huya.png" width="420"></td>
+<td align="center"><b>抖音</b><br><img src="docs/screenshot-douyin.png" width="420"></td>
+</tr>
+<tr>
+<td align="center"><b>YouTube</b><br><img src="docs/screenshot-youtube.png" width="420"></td>
+<td align="center"><b>SOOP</b><br><img src="docs/screenshot-soop.png" width="420"></td>
+</tr>
+<tr>
+<td align="center"><b>Twitch</b><br><img src="docs/screenshot-twitch.png" width="420"></td>
+<td align="center"><b>关注页</b><br><img src="docs/screenshot-follow.png" width="420"></td>
+</tr>
+<tr>
+<td align="center"><b>设置</b><br><img src="docs/screenshot-settings.png" width="420"></td>
+<td align="center"><b>关于 / 致谢</b><br><img src="docs/screenshot-about.png" width="420"></td>
+</tr>
+</table>
+
+---
+
 ## 下载安装
 
 去 **[Releases](https://github.com/xinyuzjj/junlive/releases/latest)** 页面下载对应系统的安装包：

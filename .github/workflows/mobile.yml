@@ -180,6 +180,15 @@ jobs:
           echo "LIBCLANG_PATH = $LLVM_LIB"
           ls "$LLVM_LIB"/libclang*.dylib 2>/dev/null | head -3 || echo "（没列到，靠 Xcode 默认查找）"
 
+          # 还要把 Rust 的 target 名翻成 clang 认的三元组。
+          # bindgen 默认直接把 `aarch64-apple-ios-sim` 丢给 clang，而 clang 不认 `-sim`：
+          #   error: version 'sim' in target triple 'aarch64-apple-ios-sim' is invalid
+          # clang 用的是 `-simulator`，且 Apple Silicon 上写 `arm64` 更稳。
+          echo "BINDGEN_EXTRA_CLANG_ARGS_aarch64_apple_ios_sim=--target=arm64-apple-ios-simulator" >> "$GITHUB_ENV"
+          echo "BINDGEN_EXTRA_CLANG_ARGS_aarch64_apple_ios=--target=arm64-apple-ios" >> "$GITHUB_ENV"
+          echo "BINDGEN_EXTRA_CLANG_ARGS_x86_64_apple_ios=--target=x86_64-apple-ios" >> "$GITHUB_ENV"
+          echo "bindgen 目标三元组已映射（ios-sim → ios-simulator）"
+
       - name: 安装前端依赖
         run: npm ci
 
