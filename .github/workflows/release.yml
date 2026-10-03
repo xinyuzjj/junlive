@@ -91,3 +91,99 @@ jobs:
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
+
+  # 顺带把 Android APK 也发到同一个 Release。
+  # needs: build —— 桌面那四个 job 里 tauri-action 会把 Release 创建出来，
+  # 必须等它建好，否则 gh release upload 会找不到 release。
+  android:
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      RUSTUP_TOOLCHAIN: stable
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: 安装 Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # 不用 android-actions/setup-android（会去装已被 SDK 移除的 tools 包而失败），
+      # ubuntu runner 本来就预装了 Android SDK + NDK。
+      - name: 配置 Android SDK / NDK
+        run: |
+          echo "ANDROID_HOME=${ANDROID_HOME:-/usr/local/lib/android/sdk}" >> "$GITHUB_ENV"
+          NDK="${ANDROID_NDK_LATEST_HOME:-}"
+          if [ -z "$NDK" ]; then NDK="$(ls -d "${ANDROID_HOME}"/ndk/* 2>/dev/null | sort -V | tail -1)"; fi
+          if [ -z "$NDK" ]; then echo "::error::没找到 NDK"; exit 1; fi
+          echo "NDK_HOME=$NDK" >> "$GITHUB_ENV"
+          NDKBIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          echo "$NDKBIN" >> "$GITHUB_PATH"
+          for t in aarch64-linux-android armv7a-linux-androideabi i686-linux-android x86_64-linux-android; do
+            sudo ln -sf "$NDKBIN/llvm-ranlib" "/usr/local/bin/$t-ranlib"
+            sudo ln -sf "$NDKBIN/llvm-ar" "/usr/local/bin/$t-ar"
+          done
+          echo "NDK = $NDK"
+
+      - name: 安装 libclang（rquickjs bindgen 用）
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libclang-dev clang
+          echo "LIBCLANG_PATH=$(llvm-config --libdir 2>/dev/null || echo /usr/lib/llvm-18/lib)" >> "$GITHUB_ENV"
+
+      # bindgen 交叉编译默认用宿主机的 clang 和内建头，会报
+      #   /usr/include/limits.h:26:10: fatal error: 'bits/libc-header-start.h' file not found
+      # 必须显式把 NDK 的 sysroot 和目标三元组喂给它。
+      - name: 让 bindgen 使用 NDK 的 sysroot
+        run: |
+          SYSROOT="$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
+          for pair in aarch64-linux-android:aarch64-linux-android21 \
+                      armv7-linux-androideabi:armv7a-linux-androideabi21 \
+                      i686-linux-android:i686-linux-android21 \
+                      x86_64-linux-android:x86_64-linux-android21; do
+            crate_t="${pair%%:*}"; clang_t="${pair##*:}"
+            echo "BINDGEN_EXTRA_CLANG_ARGS_${crate_t//-/_}=--sysroot=${SYSROOT} --target=${clang_t}" >> "$GITHUB_ENV"
+          done
+          echo "NDK sysroot 已就绪: $SYSROOT"
+
+      - name: 安装 Rust（含 Android 目标）
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: 缓存 Rust 编译产物
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: 安装前端依赖
+        run: npm ci
+
+      # 移动端要 cdylib，且要删掉钉死 Windows 工具链的 rust-toolchain.toml
+      - name: 移动端构建适配
+        run: |
+          sed -i 's/crate-type = \["staticlib", "rlib"\]/crate-type = ["staticlib", "cdylib", "rlib"]/' src-tauri/Cargo.toml
+          grep -q 'cdylib' src-tauri/Cargo.toml || { echo "::error::crate-type 替换失败"; exit 1; }
+          rm -f src-tauri/rust-toolchain.toml
+
+      - name: 构建 APK
+        run: npx tauri android build --apk --debug --target aarch64
+
+      - name: 把 APK 传进 Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.ref_type == 'tag' && github.ref_name || 'v1.0.1' }}"
+          APK="$(find src-tauri/gen/android/app/build/outputs/apk -name '*.apk' | head -1)"
+          if [ -z "$APK" ]; then echo "::error::没找到 APK"; exit 1; fi
+          echo "APK = $APK"
+          cp "$APK" "JunLive-${TAG}-android-arm64.apk"
+          ls -la "JunLive-${TAG}-android-arm64.apk"
+          gh release upload "$TAG" "JunLive-${TAG}-android-arm64.apk" --clobber
+          gh release view "$TAG" --json assets -q '.assets[].name'

@@ -11,10 +11,11 @@
 [![Platform](https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-Windows%20%7C%20macOS%20%7C%20Linux-0078d4?style=flat-square)](#download)
 [![Tauri](https://img.shields.io/badge/Tauri-2.x-24c8db?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app)
 [![Vue](https://img.shields.io/badge/Vue-3.x-42b883?style=flat-square&logo=vuedotjs&logoColor=white)](https://vuejs.org)
+[![License](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)](LICENSE)
 
 <sub>
 
-[界面预览](#preview) · [下载安装](#download) · [平台支持](#platforms) · [功能](#features) · [技术栈](#stack) · [从源码构建](#build) · [已知限制](#limits) · [移动端](#mobile) · [致谢](#credits)
+[界面预览](#preview) · [下载安装](#download) · [平台支持](#platforms) · [功能](#features) · [技术栈](#stack) · [从源码构建](#build) · [已知限制](#limits) · [移动端](#mobile) · [致谢](#credits) · [许可证](#license)
 
 </sub>
 
@@ -74,6 +75,7 @@
 | **Linux** | `JunLive_x.y.z_amd64.AppImage` | 免安装，`chmod +x` 后直接运行 |
 | | `JunLive_x.y.z_amd64.deb` | Debian / Ubuntu：`sudo dpkg -i xxx.deb` |
 | | `JunLive_x.y.z_x86_64.rpm` | Fedora / RHEL：`sudo rpm -i xxx.rpm` |
+| **Android** | `JunLive_vX.Y.Z-android-arm64.apk` | arm64 手机 **侧载安装**（debug 免签名包，非上架包） |
 
 > [!NOTE]
 > **macOS 首次打开提示「无法验证开发者」**：右键点应用 → 打开 → 再点「打开」，
@@ -466,6 +468,27 @@ zrfme-live 的作者原话是「我长期使用 lemon-live 看直播，它用不
 以及抖音房间列表的 `a_bogus` 签名实现。
 
 > 上游线索来自 [zrfme-live](https://github.com/shaoyouvip/zrfme-live) 的致谢列表。
+
+---
+
+<a id="license"></a>
+
+## 📜 许可证
+
+本项目自己的代码（Rust 后端、Vue 前端、构建脚本、文档）采用 **[MIT License](LICENSE)** ——
+可以自由使用、修改、分发、商用，只需保留版权声明。
+
+> [!IMPORTANT]
+> **仓库里有一个文件不在 MIT 范围内**：`src-tauri/src/danmaku/sign.js`。
+> 它是抖音网页端用于生成 `X-Bogus` 签名的**混淆脚本**（`window.byted_acrawler` 1.0.0.53），
+> 版权归字节跳动所有，是第三方专有代码，本项目仅原样保留以保证弹幕通道可用。
+> 如权利人认为不妥，开 issue 后会立即移除（届时抖音弹幕将不可用）。
+> 完整的第三方声明见 [LICENSE](LICENSE) 末尾。
+
+为什么选 MIT 而不是 GPL / AGPL：这是个个人学习与自用性质的聚合客户端，
+MIT 最简洁、生态最匹配（上游 `pure_live` 同为 MIT），
+别人拿去改也不会背上「衍生作品必须开源」的负担；
+而 copyleft 对这类工具没有实际收益。
 
 ---
 

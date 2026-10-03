@@ -1,0 +1,58 @@
+MIT License
+
+Copyright (c) 2026 峻峻尼 (junjunni) <hallozjj@Outlook.com>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+## 第三方内容声明 (Third-Party Notices)
+
+本许可证**仅覆盖本项目作者编写的代码**（Rust 后端、Vue 前端、构建脚本与文档）。
+仓库中包含的以下内容版权归其各自权利人所有，**不在 MIT 许可证的授权范围内**：
+
+### 1. `src-tauri/src/danmaku/sign.js`
+
+抖音（ByteDance）网页端用于生成 `X-Bogus` 签名的混淆脚本
+（`window.byted_acrawler`，脚本内标注版本 `1.0.0.53`）。
+
+该文件是从抖音网页端获取的**第三方专有代码**，版权归字节跳动所有，
+本项目仅出于「让弹幕通道能够工作」的目的原样保留，**未做任何主张**。
+如权利人认为不妥，提交 issue 后会立即移除，届时抖音弹幕将不可用。
+
+### 2. 参考实现（仅参考思路，未复制代码）
+
+- [streamlink](https://github.com/streamlink/streamlink)（BSD-2-Clause）——
+  斗鱼 web 播放地址签名流程、SOOP 播放流程的参考
+- [pure_live](https://github.com/liuchuancong/pure_live)（MIT）——
+  平台能力模型、SOOP 弹幕协议（`soop_danmaku.dart`）的参考
+- [Simple Live](https://github.com/xiaoyaocz/dart_simple_live) ——
+  各平台分区树 / 房间列表 / 搜索接口的抓取思路参考
+- [douyinLive](https://github.com/jwwsjlm/douyinLive) ——
+  抖音 Webcast 弹幕接入方式的参考
+- [multistream](https://github.com/ilanzgx/multistream) ——
+  「流从官方播放器加载」的形态参考
+- [DTV](https://github.com/chen-zeong/DTV) ——
+  关注列表在线状态持久化、CSS 全屏的实现思路参考
+
+### 3. 其他依赖
+
+前端（Vue / hls.js / mpegts.js 等）与后端（Tauri / tokio / reqwest / rquickjs 等）
+全部第三方依赖，遵循各自的许可证，详见 `package.json`、`src-tauri/Cargo.toml`
+与各自的 LICENSE 文件。
