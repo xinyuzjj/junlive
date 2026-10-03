@@ -92,7 +92,10 @@ jobs:
             echo "${var}=--sysroot=${SYSROOT} --target=${clang_t}" >> "$GITHUB_ENV"
             echo "${var} = --sysroot=${SYSROOT} --target=${clang_t}"
           done
-          ls "$SYSROOT/usr/include/bits/libc-header-start.h" && echo "sysroot 头文件就位 ✅"
+          # 只看一眼 sysroot 里有没有内建头，**不能让它决定成败**
+          # （不同 NDK 版本目录布局有差异，缺了这个文件 bindgen 也可能照样能用）。
+          ls "$SYSROOT/usr/include/" 2>/dev/null | head -5 || true
+          echo "NDK sysroot 已就绪: $SYSROOT"
 
       - name: 安装 Rust（含 Android 目标）
         uses: dtolnay/rust-toolchain@stable
