@@ -60,25 +60,24 @@ export function isOverseas(platform: string | undefined): boolean {
 /**
  * 父页面 host —— Twitch 的 embed 要求 `parent` 与嵌入页同域，否则拒绝渲染。
  *
- * ⚠️ 这里踩过一个坑：原来写的是
- *   `if (h && !h.includes("tauri")) return h;  return "localhost"`
- * 而 Tauri 的 hostname 恰恰就是 `tauri.localhost`（安卓是 `tauri.localhost`
- * 或 `localhost`），所以 `!h.includes("tauri")` 永远为假，**永远返回
- * "localhost"**。结果 Twitch 在桌面端拿到的 parent 和真实域名不匹配，直接拒绝。
+ * ⚠️ 这里踩过两次坑，都因为「dev 能播 ≠ 安装版能播」：
  *
- * 现在按「Twitch 允许的特例」处理：Tauri 的 origin 落在
- * `tauri.localhost` / `localhost` 这两个值时，直接原样交给 Twitch ——
- * 桌面端与安卓端都能对上。
+ * ① 原来写的是 `if (h && !h.includes("tauri")) return h; return "localhost"`
+ *    而 Tauri 的 hostname 恰恰就是 `tauri.localhost`，所以判断永远为假、
+ *    永远返回 "localhost"。—— 结果反而是对的，但纯属巧合。
+ *
+ * ② 后来我改成「Tauri 的特殊值原样透传」：
+ *    `if (h === "tauri.localhost" || h === "localhost" || h === "127.0.0.1") return h`
+ *    dev 版 origin 是 `http://localhost:1420` → 返回 "localhost" → **能播**；
+ *    打包后 origin 是 `http://tauri.localhost` → 返回 "tauri.localhost"
+ *    → **Twitch 拒绝**，报「player.twitch.tv 拒绝连接」。
+ *    也就是说：本地 dev 一切正常，装成 exe 就坏 —— 最难查的一类问题。
+ *
+ * **结论：Twitch 的 parent 白名单里没有 `tauri.localhost` 这个值。**
+ * 官方播放器在 Tauri 里只能用 `localhost`（Tauri 官方就是用这个值过审的）。
+ * 所以现在无条件返回 `localhost` —— 两种环境都指向它，都能播。
  */
 export function parentHost(): string {
-  try {
-    const h = (window.location.hostname || "").trim();
-    // Tauri 各平台可能给的值：tauri.localhost / localhost / 127.0.0.1
-    if (h === "tauri.localhost" || h === "localhost" || h === "127.0.0.1") return h;
-    if (h) return h;
-  } catch {
-    /* 忽略 */
-  }
   return "localhost";
 }
 

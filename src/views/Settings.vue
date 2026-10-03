@@ -38,7 +38,7 @@ import {
   dmSpeed,
 } from "../dmSettings";
 
-const VERSION = "1.1.5";
+const VERSION = "1.1.6";
 
 const router = useRouter();
 
