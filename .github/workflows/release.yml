@@ -11,6 +11,10 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: true
 
+# 默认的 GITHUB_TOKEN 是只读的，创建 Release 需要显式给 contents: write
+permissions:
+  contents: write
+
 jobs:
   build:
     strategy:

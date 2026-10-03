@@ -13,6 +13,7 @@
  *   4. 数据管理    —— 清空关注 / 清空 Cookie
  */
 import { computed, onMounted, ref } from "vue";
+import { useRouter } from "vue-router";
 import {
   getBilibiliCookie,
   getProxySetting,
@@ -36,6 +37,8 @@ import {
 } from "../dmSettings";
 
 const VERSION = "0.1.0";
+
+const router = useRouter();
 
 /** 预览用的颜色（auto 模式平台各不同，给个中性示意） */
 const previewColor = computed(() => {
@@ -301,6 +304,9 @@ async function clearCookies() {
         <b>JunLive</b> v{{ VERSION }} · Tauri 2 + Vue 3 · 本地流代理 + 自建弹幕
       </div>
       <div class="dim">仅供个人学习交流，请遵守各平台的服务条款。</div>
+      <div class="row" style="margin-top: 10px">
+        <button @click="router.push('/about')">项目介绍 / GitHub</button>
+      </div>
     </section>
   </div>
 </template>
