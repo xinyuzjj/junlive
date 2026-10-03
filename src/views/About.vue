@@ -10,7 +10,7 @@
  */
 import { openUrl } from "@tauri-apps/plugin-opener";
 
-const VERSION = "0.1.1";
+const VERSION = "1.0.1";
 const REPO = "https://github.com/xinyuzjj/junlive";
 const RELEASES = `${REPO}/releases/latest`;
 const ISSUES = `${REPO}/issues`;
@@ -24,9 +24,7 @@ const AUTHOR = {
     { k: "GitHub", v: "@xinyuzjj", href: "https://github.com/xinyuzjj" },
     { k: "推特", v: "@hll404357315674", href: "https://x.com/hll404357315674" },
     { k: "电报", v: "@junjunnizxcz", href: "https://t.me/junjunnizxcz" },
-    { k: "微信", v: "junjunnizz", href: "" },
-    { k: "QQ", v: "1742259821", href: "" },
-    { k: "邮箱", v: "1742259821@qq.com", href: "mailto:1742259821@qq.com" },
+    { k: "邮箱", v: "hallozjj@Outlook.com", href: "mailto:hallozjj@Outlook.com" },
   ] as { k: string; v: string; href: string }[],
 };
 

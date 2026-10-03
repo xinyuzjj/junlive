@@ -232,9 +232,7 @@ GNU 工具链下还有一个坑：`crate-type` 不能带 `cdylib`，否则链接
 | GitHub | [@xinyuzjj](https://github.com/xinyuzjj) |
 | 推特 | [@hll404357315674](https://x.com/hll404357315674) |
 | 电报 | [@junjunnizxcz](https://t.me/junjunnizxcz) |
-| 微信 | junjunnizz |
-| QQ | 1742259821 |
-| 邮箱 | 1742259821@qq.com |
+| 邮箱 | hallozjj@Outlook.com |
 
 > **开发方式**：本项目全程使用 [Hermes Agent](https://hermes-agent.nousresearch.com)（Nous Research 出品）
 > 完成 —— 从平台接口抓取、签名逆向、弹幕通道，到前端界面与三平台发布流水线，
