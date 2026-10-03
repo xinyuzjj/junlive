@@ -236,6 +236,10 @@ GNU 工具链下还有一个坑：`crate-type` 不能带 `cdylib`，否则链接
 | QQ | 1742259821 |
 | 邮箱 | 1742259821@qq.com |
 
+> **开发方式**：本项目全程使用 [Hermes Agent](https://hermes-agent.nousresearch.com)（Nous Research 出品）
+> 完成 —— 从平台接口抓取、签名逆向、弹幕通道，到前端界面与三平台发布流水线，
+> 均由 AI Agent 协作实现。
+
 有问题、想提需求，或者想聊直播协议逆向，欢迎开 issue 或直接联系。
 
 </td>

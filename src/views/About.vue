@@ -30,6 +30,13 @@ const AUTHOR = {
   ] as { k: string; v: string; href: string }[],
 };
 
+/** 开发方式：全程用 Hermes Agent 完成 */
+const HERMES = {
+  name: "Hermes Agent",
+  url: "https://hermes-agent.nousresearch.com",
+  by: "Nous Research",
+};
+
 function open(u: string) {
   openUrl(u).catch(() => window.open(u, "_blank"));
 }
@@ -132,6 +139,18 @@ const CREDITS = [
           <span v-else class="cv">{{ c.v }}</span>
         </div>
       </div>
+
+      <!-- 开发方式 -->
+      <div class="built">
+        <span class="ck">开发</span>
+        <span class="cv">
+          本项目全程使用
+          <a @click="open(HERMES.url)">{{ HERMES.name }}</a>
+          （{{ HERMES.by }}）完成 —— 从平台接口抓取、签名逆向、弹幕通道，
+          到前端界面与三平台发布流水线，均由 AI Agent 协作实现。
+        </span>
+      </div>
+
       <p class="hint" style="margin: 12px 0 0">
         有问题、想提需求，或者想聊直播协议逆向，欢迎开 issue 或直接联系。
       </p>
@@ -420,6 +439,32 @@ h1 {
   cursor: pointer;
 }
 .crow a:hover {
+  text-decoration: underline;
+}
+
+/* 开发方式（用 Hermes Agent 完成） */
+.built {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  background: var(--brand-soft);
+  border-radius: 8px;
+  font-size: 12.5px;
+  line-height: 1.8;
+  color: var(--fg-2);
+}
+.built .ck {
+  color: var(--fg-dim);
+  flex: none;
+}
+.built a {
+  color: var(--accent);
+  cursor: pointer;
+  font-weight: 600;
+}
+.built a:hover {
   text-decoration: underline;
 }
 
