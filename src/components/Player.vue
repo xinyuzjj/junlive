@@ -583,7 +583,7 @@ defineExpose({ reload });
     @mousemove="poke"
     @click="poke"
   >
-    <!-- YouTube：官方 iframe 播放器（自带控件，自己处理 PO token） -->
+    <!-- 走官方 iframe 的平台（YouTube / Twitch，以及切成「官方播放页」的 SOOP） -->
     <iframe
       v-if="isEmbed"
       ref="embedRef"
@@ -596,9 +596,7 @@ defineExpose({ reload });
 
     <!-- YouTube 走官方 iframe、没有自定义控制栏，把弹幕设置和全屏放在画面右下角。
          全屏要用我们自己的（对 .player 全屏），这样弹幕层才还在。 -->
-    <!-- SOOP 不要这条工具条：弹幕没接（SOOP 弹幕通道未实现），
-         全屏官方播放器自带，整条隐藏 -->
-    <div v-if="isEmbed && props.platform !== 'soop'" class="embed-tools">
+    <div v-if="isEmbed" class="embed-tools">
       <DmSet />
       <button
         class="ico"

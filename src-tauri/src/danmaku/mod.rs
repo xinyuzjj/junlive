@@ -26,6 +26,7 @@ mod douyin;
 mod douyu;
 mod huya;
 mod sign;
+mod soop;
 mod twitch;
 mod youtube;
 
@@ -104,6 +105,7 @@ pub async fn start(app: Option<AppHandle>, platform: &str, room_id: &str) -> Res
             "huya" => huya::run_huya(app.clone(), rid.clone(), my).await,
             "twitch" => twitch::run_twitch(app.clone(), rid.clone(), my).await,
             "youtube" => youtube::run_youtube(app.clone(), rid.clone(), my).await,
+            "soop" => soop::run_soop(app.clone(), rid.clone(), my).await,
             other => Err(format!("{other} 的弹幕暂未接入")),
         };
         if let Err(e) = r {
