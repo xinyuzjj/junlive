@@ -176,62 +176,53 @@ async fn set_youtube_cookie(cookie: Option<String>) {
 use immersive::android_immersive;
 
 
-/// 让**官方 iframe 播放器**（Twitch / YouTube）走代理。
+/// 需要走代理的平台（海外）。
 ///
-/// 为什么要单独做：自建流走 `net.rs`（reqwest），能读到设置里填的代理；
-/// 但 iframe 里的请求**完全不经过 Rust**，是 WebView 自己发的。
-/// WebView2 / WebKit 默认只认**系统代理或环境变量**，不知道我们存的那个地址
-/// —— 于是 Twitch 直接「拒绝连接」（实测：直连 player.twitch.tv 12 秒超时，
-/// 走代理 302 正常）。
+/// ⚠️ 必须与 `net.rs` 的分流保持一致，也与前端 `src/embed.ts` 的
+/// `OVERSEAS_PLATFORMS` 一致：
+///   国内 bilibili / douyu / huya / douyin —— 直连
+///   海外 twitch / youtube / soop        —— 必须走代理
 ///
-/// ⚠️ 时机很关键：WebView2 只在**创建时**读一次
-/// `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`，之后改环境变量对它无效。
-/// 所以必须在 `setup()` 里、WebView 还没建之前设好。
-fn apply_webview_proxy() {
-    let Some(url) = net::get_proxy() else { return };
-    // 只认 http/https/socks5 形态。脏数据直接跳过，别把 WebView 弄挂。
-    if !(url.starts_with("http://")
-        || url.starts_with("https://")
-        || url.starts_with("socks5://"))
-    {
-        return;
-    }
+/// 之前这里是**全局**给 WebView 挂代理，等于让斗鱼虎牙B站抖音也绕代理走一圈，
+/// 那是「国内外混在一起」，既慢又可能触发风控。三处必须一致，改一处就要改三处。
+pub const OVERSEAS_PLATFORMS: &[&str] = &["twitch", "youtube", "soop"];
 
-    // WebView2（Windows）：追加而不是覆盖，避免把别的参数弄丢。
-    #[cfg(target_os = "windows")]
-    {
-        let key = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS";
-        let prev = std::env::var(key).unwrap_or_default();
-        if !prev.contains("--proxy-server") {
-            let next = format!("{} --proxy-server={}", prev.trim(), url);
-            std::env::set_var(key, next.trim());
-        }
-    }
+/// 这个平台要不要走代理。放到子模块里定义，避免 `#[tauri::command]`
+/// 生成的宏在 lib.rs 顶层与 `generate_handler!` 撞名（E0255）。
+pub mod routing {
+    use super::OVERSEAS_PLATFORMS;
 
-    // WebKitGTK（Linux）认这两个环境变量。
-    #[cfg(target_os = "linux")]
-    {
-        std::env::set_var("http_proxy", &url);
-        std::env::set_var("https_proxy", &url);
-        if url.starts_with("socks5://") {
-            std::env::set_var("all_proxy", &url);
-        }
-    }
-
-    // macOS 的 WKWebView 不读上面任何一个环境变量，只能靠系统网络设置
-    // （Tauri 2 有 macOSPrivateApi，但没有 WebView 代理开关）。
-    // 所以在 macOS 上如实留空 —— 那边要靠用户自己装系统级代理软件。
-    #[cfg(target_os = "macos")]
-    {
-        let _ = url;
+    /// 设置页/播放页切换平台时问一句：国内直连，海外走代理。
+    #[tauri::command]
+    pub fn needs_proxy(platform: String) -> bool {
+        OVERSEAS_PLATFORMS.contains(&platform.as_str())
     }
 }
 
+/// **刻意不做** WebView 代理注入 —— 查过之后发现这是多余的，而且有害。
+///
+/// 曾经的错误做法：给 WebView2 塞 `--proxy-server`、给 Linux 塞
+/// `http_proxy`，想让官方播放器能走代理。当时的判断是
+/// 「iframe 里的请求不经过 Rust，读不到我们存的代理」。
+///
+/// 查证结果（对照 github.com/ilanzgx/multistream —— 它全项目零代理代码）：
+///   ① WebView2 / WebKit **本来就默认读系统代理**
+///      （Windows 读 HKCU\...\Internet Settings 的 ProxyServer；
+///        本机实测 ProxyEnable=1、ProxyServer=127.0.0.1:7897）。
+///   ② 强行塞 `--proxy-server` 反而会**覆盖**系统设置 ——
+///      用户改了系统代理但应用还按旧地址走，表现为「改了设置也没用」。
+///   ③ 正确做法是**根本不用 iframe 播放器**：
+///      Twitch 改回自建流（GQL -> usher -> 本地代理回源），
+///      请求由 Rust 发，`net::relay_proxy()` 读得到代理；
+///      m3u8 与分片都经 `proxy::wrap(url, headers, true)`，
+///      第三个参数 true = 走代理，国内平台传 false = 直连。
+///      这套分流在 `proxy.rs:371` 已经实现好了。
+///
+/// 保留 `OVERSEAS_PLATFORMS` / `needs_proxy` 作为**唯一的分流真相源**，
+/// 给前端判断当前平台是否海外用（与 embed.ts 里的同名常量必须一致）。
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // 必须在 Tauri 创建任何 WebView 之前设好 —— 见 apply_webview_proxy 的注释。
-    apply_webview_proxy();
-
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|_app| {
@@ -249,6 +240,7 @@ pub fn run() {
             get_room,
             set_stream_renew,
             android_immersive,
+            routing::needs_proxy,
             get_proxy_setting,
             set_proxy_setting,
             get_proxy_port,

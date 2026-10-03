@@ -241,3 +241,15 @@ export const youtubeLogin = () => invoke<string>("youtube_login");
 export async function androidImmersive(enable: boolean): Promise<{ applied: boolean; detail: string }> {
   return invoke<{ applied: boolean; detail: string }>("android_immersive", { enable });
 }
+
+/**
+ * 这个平台要不要走代理。
+ *
+ * ⚠️ 与 Rust 侧 `lib.rs::OVERSEAS_PLATFORMS` 和 `net.rs` 的分流必须一致：
+ *   国内 bilibili / douyu / huya / douyin —— 直连
+ *   海外 twitch / youtube / soop        —— 必须走代理
+ * 混用会导致国内平台绕远路变慢，海外平台连不上。
+ */
+export async function needsProxy(platform: string): Promise<boolean> {
+  return invoke<boolean>("needs_proxy", { platform });
+}

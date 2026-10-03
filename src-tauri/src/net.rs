@@ -16,7 +16,7 @@ pub const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.
 static PROXY: OnceCell<RwLock<Option<String>>> = OnceCell::new();
 
 fn proxy_cell() -> &'static RwLock<Option<String>> {
-    PROXY.get_or_init(|| RwLock::new(detect_proxy()))
+    PROXY.get_or_init(|| RwLock::new(load_proxy_from_disk().or_else(detect_proxy)))
 }
 
 /// 自动探测系统代理
@@ -157,8 +157,50 @@ pub fn get_proxy() -> Option<String> {
 }
 
 pub fn set_proxy(p: Option<String>) {
+    let p = p.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
     if let Ok(mut w) = proxy_cell().write() {
-        *w = p.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+        *w = p.clone();
+    }
+    // ⚠️ 必须持久化。此前代理只存在内存里，**重启应用就没了** ——
+    // 表现是「设置页填了代理、Twitch 也连上了，但重启后又连不上」，
+    // 因为 WebView 的 --proxy-server 只在启动时注入一次。
+    save_proxy_to_disk(p.as_deref());
+}
+
+/// 代理配置文件（放在配置目录里，跟着用户走）
+fn proxy_conf_path() -> Option<std::path::PathBuf> {
+    let mut p = std::env::var_os("APPDATA")
+        .or_else(|| std::env::var_os("HOME"))
+        .map(std::path::PathBuf::from)?;
+    p.push("JunLive");
+    std::fs::create_dir_all(&p).ok()?;
+    p.push("proxy.txt");
+    Some(p)
+}
+
+fn save_proxy_to_disk(p: Option<&str>) {
+    let Some(path) = proxy_conf_path() else { return };
+    let r = match p {
+        Some(v) => std::fs::write(&path, v),
+        None => std::fs::write(&path, ""),
+    };
+    if let Err(e) = r {
+        eprintln!("[proxy] 保存失败: {e}");
+    }
+}
+
+/// 启动时读回上次保存的代理。
+///
+/// 优先级：**用户设置里存的** > 环境变量 > 系统代理。
+/// 用户手填的排最前，因为他可能特意填了与系统不同的地址。
+fn load_proxy_from_disk() -> Option<String> {
+    let path = proxy_conf_path()?;
+    let s = std::fs::read_to_string(path).ok()?;
+    let s = s.trim().to_string();
+    if s.is_empty() {
+        None
+    } else {
+        Some(normalize(&s))
     }
 }
 

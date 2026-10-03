@@ -1,13 +1,22 @@
 /**
  * 走「官方 iframe 播放器」的平台。
  *
- * 这些平台不用我们自己拉流，而是嵌平台的官方播放器 —— 参考
- * github.com/ilanzgx/multistream（README 原话 "Streams load from the official players"）。
+ * 这些平台不用我们自己拉流，而是嵌平台的官方播放器。
  *
  * - **youtube**：YouTube 现在对 videoplayback 分片强制校验 PO token，
  *   自己拿到的 hlsManifestUrl 能拉列表、但分片一律 403（表现是一直缓冲）。
- * - **twitch**：自己拉 HLS 时清晰度会随 ABR 一直变，且 usher 的 token 有时效，
- *   容易出网络错误。官方播放器自己管清晰度选择、鉴权和重连。
+ *   这不是我们能绕过的，只能用官方播放器。
+ *
+ * **twitch 已改回自建流**（原来在这里是错的）：
+ * 之前把 Twitch 也归到 iframe，用 `player.twitch.tv` 官方播放器，实测问题一堆：
+ *   ① iframe 里的请求由 WebView 发出，**不经过 Rust**，读不到我们存的代理；
+ *   ② `parent` 参数校验一旦不匹配就整页拒绝（实测不带 parent 直接报
+ *      「哎哟！该嵌入配置错误。」）；
+ *   ③ 官方播放器自带控件，我们的画质/线路选择器对它无效。
+ * 而我们的 `platforms/twitch.rs` **本来就已经实现了完整的自建流**
+ * （GQL 取 streamPlaybackAccessToken → usher 换 m3u8），一直被我浪费着。
+ * 参考 github.com/ilanzgx/multistream 的 `TwitchNativePlayer.vue`：它也是
+ * `invoke("twitch_get_hls_url")` 拿地址后交给 hls.js 播，**同样不用 iframe**。
  *
  * **SOOP 不走 embed**（试过，已撤回）：
  * 官方 embed 的画质选择器被官方硬关掉了（HTML 里 `<!-- 화질선택 임베디드는 미노출 -->`），
@@ -19,7 +28,7 @@
  */
 import { soopEmbedSrc, soopMode, soopOfficialSrc } from "./soopMode";
 
-export const EMBED_PLATFORMS = ["youtube", "twitch"];
+export const EMBED_PLATFORMS = ["youtube"];
 
 /**
  * SOOP 例外：**是否走官方播放器由用户设置决定**（见 `soopMode.ts`）。
@@ -30,6 +39,23 @@ export function isEmbedPlatform(p?: string): boolean {
   // SOOP：只有「自建流」不走 iframe，另外两种官方方式都走
   if (p === "soop") return soopMode.value !== "native";
   return EMBED_PLATFORMS.includes(p);
+}
+
+/**
+ * 哪些平台需要代理。
+ *
+ * ⚠️ 必须与 Rust 侧保持一致：`net::relay()`（直连）给国内平台用，
+ * `net::relay_proxy()`（走代理）给海外平台用。两边混用是国内平台变慢、
+ * 海外平台连不上的根源。
+ *
+ * 国内：bilibili / douyu / huya / douyin —— 直连
+ * 海外：twitch / youtube / soop —— 必须走代理
+ */
+const OVERSEAS_PLATFORMS = ["twitch", "youtube", "soop"];
+
+/** 当前是不是在看海外平台 —— 决定 WebView 要不要用代理 */
+export function isOverseas(platform: string | undefined): boolean {
+  return !!platform && OVERSEAS_PLATFORMS.includes(platform);
 }
 
 /**
