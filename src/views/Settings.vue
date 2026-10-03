@@ -202,7 +202,7 @@ async function clearCookies() {
               <option value="embed">官方播放器（最干净，画质官方定）</option>
               <option value="official">官方完整播放页（画质可调，带官网界面）</option>
             </select>
-            <span class="pv">切换后重新进入 SOOP 房间生效</span>
+            <span class="tip">切换后重新进入 SOOP 房间生效</span>
           </span>
         </label>
       </div>
@@ -488,6 +488,13 @@ h2 {
   font-weight: 600;
   font-size: 12.5px;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+}
+
+/* 下拉框旁边的普通说明文字（**不要**用 .pv —— 那是给深色背景上的弹幕预览用的，
+   放到浅色的设置页上会变成黑底黑字，完全看不清） */
+.slider .tip {
+  color: var(--fg-dim);
+  font-size: 12.5px;
 }
 
 /* Cookie 子块 */
