@@ -1,6 +1,6 @@
 [package]
 name = "junlive"
-version = "1.1.0"
+version = "1.1.1"
 license = "MIT"
 description = "JunLive —— 多平台直播聚合桌面客户端（斗鱼/虎牙/B站/抖音/YouTube/SOOP/Twitch）"
 authors = ["xinyuzjj"]
