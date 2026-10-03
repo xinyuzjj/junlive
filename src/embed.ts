@@ -8,17 +8,16 @@
  *   自己拿到的 hlsManifestUrl 能拉列表、但分片一律 403（表现是一直缓冲）。
  * - **twitch**：自己拉 HLS 时清晰度会随 ABR 一直变，且 usher 的 token 有时效，
  *   容易出网络错误。官方播放器自己管清晰度选择、鉴权和重连。
- * - **soop**：自建流虽然能拿到 1080p（`--test room soop <id>` 实测四档齐全，
- *   分片 200 OK / 2.2MB），但进播放器后分片会被 abort、currentTime 卡住，
- *   报「网络连接失败」—— SOOP 的 aid 时效太短，hls.js 后续刷新拿不到。
- *   所以还是用官方播放器。代价是它的画质选择器被官方关掉了
- *   （embed HTML 里 `<!-- 화질선택 임베디드는 미노출 -->`），画质走 auto，
- *   实测会落在 640x360 SD 档。
+ *
+ * **SOOP 不走 embed**（试过，已撤回）：
+ * 官方 embed 的画质选择器被官方硬关掉了（HTML 里 `<!-- 화질선택 임베디드는 미노출 -->`），
+ * 实测落在 640x360 SD 档，而且 iframe 会把点击全吃掉，进去以后界面点不动。
+ * 自建流能拿到 1080p/720p/540p/360p 四档（`--test room soop <id>` 实测）。
  *
  * 代价：官方播放器自带控件，我们的画质/线路选择器对它无效；
  * 它自带的全屏是 iframe 内部全屏，弹幕层会被盖住，所以全屏要用我们自己的按钮。
  */
-export const EMBED_PLATFORMS = ["youtube", "twitch", "soop"];
+export const EMBED_PLATFORMS = ["youtube", "twitch"];
 
 export function isEmbedPlatform(p?: string): boolean {
   return !!p && EMBED_PLATFORMS.includes(p);

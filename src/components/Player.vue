@@ -489,7 +489,6 @@ watch(
 onBeforeUnmount(() => {
   destroy();
   if (dmRaf) cancelAnimationFrame(dmRaf);
-  if (soopTimer) window.clearInterval(soopTimer);
   if (tick) window.clearInterval(tick);
   if (hideTimer) window.clearTimeout(hideTimer);
   window.removeEventListener("keydown", onKey);
@@ -593,7 +592,6 @@ defineExpose({ reload });
       :title="props.platform === 'soop' ? 'SOOP 播放器' : 'YouTube 播放器'"
       frameborder="0"
       allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-      @load="onEmbedLoad"
     ></iframe>
 
     <!-- YouTube 走官方 iframe、没有自定义控制栏，把弹幕设置和全屏放在画面右下角。
@@ -614,7 +612,7 @@ defineExpose({ reload });
     </div>
 
     <video
-      v-else
+      v-if="!isEmbed"
       ref="videoRef"
       class="vid"
       playsinline

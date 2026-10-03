@@ -41,6 +41,14 @@ pub struct Entry {
 pub struct ProxyState {
     pub map: Arc<Mutex<HashMap<String, Entry>>>,
     counter: Arc<Mutex<u64>>,
+    /// 上游 URL → 已分配的代理 id。
+    ///
+    /// **必须做这个反向映射**：m3u8 每次被重写（即每次刷新播放列表）都会给
+    /// 每个分片重新走一遍 wrap()。如果每次都发新 id，播放器拿到的分片 URL
+    /// 就会随每次刷新而变 —— hls.js 发现「片段地址变了」会把在飞的请求 abort 掉，
+    /// 表现就是分片整片 ERR_ABORTED、currentTime 卡住、最后报网络错误。
+    /// （SOOP 这种每次刷新都完整重写播放列表的平台最容易踩。）
+    rev: Arc<Mutex<HashMap<String, String>>>,
 }
 
 impl ProxyState {
@@ -51,10 +59,24 @@ impl ProxyState {
         proxy: bool,
         flv_reconnect: bool,
     ) -> String {
-        let mut c = self.counter.lock().unwrap();
-        *c += 1;
-        let id = format!("{:x}{:x}", std::process::id(), *c);
-        drop(c);
+        // 先看这个上游地址有没有已经发过 id，参数一致就直接复用
+        if let Some(id) = self.rev.lock().unwrap().get(url).cloned() {
+            let map = self.map.lock().unwrap();
+            if let Some(e) = map.get(&id) {
+                let same = e.proxy == proxy
+                    && e.flv_reconnect == flv_reconnect
+                    && e.headers == headers;
+                if same {
+                    return id;
+                }
+            }
+        }
+
+        let id = {
+            let mut c = self.counter.lock().unwrap();
+            *c += 1;
+            format!("{:x}{:x}", std::process::id(), *c)
+        };
         self.map.lock().unwrap().insert(
             id.clone(),
             Entry {
@@ -64,6 +86,10 @@ impl ProxyState {
                 flv_reconnect,
             },
         );
+        self.rev
+            .lock()
+            .unwrap()
+            .insert(url.to_string(), id.clone());
         id
     }
 }
@@ -106,6 +132,7 @@ pub fn wrap_ex(
 /// 清掉旧的注册项（切房间时调用，避免内存无限增长）
 pub fn clear() {
     STATE.map.lock().unwrap().clear();
+    STATE.rev.lock().unwrap().clear();
 }
 
 /// 启动本地代理，返回监听端口
