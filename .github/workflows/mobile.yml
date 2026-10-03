@@ -36,13 +36,21 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: 安装 Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: 安装 NDK
+      # 不要用 android-actions/setup-android：它会去装已被 SDK 移除的 `tools` 包，
+      # 报 "Failed to find package 'tools'" 直接失败。
+      # GitHub 的 ubuntu runner 本来就预装了 Android SDK + NDK，直接用即可。
+      - name: 配置 Android SDK / NDK（用 runner 预装的）
         run: |
-          sdkmanager --install "ndk;27.0.12077973"
-          echo "NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=${ANDROID_HOME:-/usr/local/lib/android/sdk}" >> "$GITHUB_ENV"
+          NDK="${ANDROID_NDK_LATEST_HOME:-}"
+          if [ -z "$NDK" ]; then
+            NDK="$(ls -d "${ANDROID_HOME}"/ndk/* 2>/dev/null | sort -V | tail -1)"
+          fi
+          if [ -z "$NDK" ]; then echo "::error::没找到 NDK"; exit 1; fi
+          echo "NDK_HOME=$NDK" >> "$GITHUB_ENV"
+          echo "SDK = ${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          echo "NDK = $NDK"
+          ls "$NDK" | head -5
 
       - name: 安装 Rust（含 Android 目标）
         uses: dtolnay/rust-toolchain@stable
@@ -104,6 +112,9 @@ jobs:
         with:
           workspaces: "./src-tauri -> target"
 
+      - name: 安装 iOS 构建依赖
+        run: brew install xcodegen
+
       - name: 安装前端依赖
         run: npm ci
 
@@ -117,8 +128,10 @@ jobs:
       - name: 生成 iOS 工程
         run: npx tauri ios init --ci --skip-targets-install
 
+      # --target 用的是 Tauri 的简写（aarch64 / x86_64 / aarch64-sim），
+      # 不是 rust 的完整三元组（写 aarch64-apple-ios 会报 invalid value）
       - name: 构建 iOS（未签名）
-        run: npx tauri ios build --debug --target aarch64-apple-ios
+        run: npx tauri ios build --debug --target aarch64
 
       - name: 上传产物
         uses: actions/upload-artifact@v4
