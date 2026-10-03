@@ -4,9 +4,31 @@ import { useRouter } from "vue-router";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listPlatforms, parseInput } from "./api";
 import { store } from "./store";
+import MobileShell from "./mobile/Shell.vue";
 
 const router = useRouter();
 const kw = ref("");
+
+/**
+ * 移动端判定。
+ *
+ * 手机屏放不下 PC 那套「顶栏七平台 + 搜索 + 跟随侧栏 + 五列卡片」——
+ * 实测在 360~430px 宽度下侧栏和卡片全挤成一团、文字小到看不清。
+ * 所以窄屏整一套换成移动布局：底部标签栏 + 单列/两列卡片 + 播放页上下分层。
+ * 820px 是平板竖屏的门槛。
+ */
+const isMobile = ref(false);
+function syncViewport() {
+  isMobile.value = window.innerWidth <= 820;
+}
+
+/** 底部标签栏的当前项 */
+const tab = computed(() => {
+  const p = router.currentRoute.value.path;
+  if (p.startsWith("/follow")) return "follow";
+  if (p.startsWith("/settings") || p.startsWith("/about")) return "settings";
+  return "home";
+});
 
 /* ---------------- 窗口按钮 ----------------
  * 原生标题栏已关掉（tauri.conf.json 里 decorations:false），
@@ -64,6 +86,8 @@ function applyBrand() {
 }
 
 onMounted(async () => {
+  syncViewport();
+  window.addEventListener("resize", syncViewport);
   try {
     store.platforms = await listPlatforms();
     if (!store.platforms.some((p) => p.id === store.current)) {
@@ -99,7 +123,15 @@ function switchPlatform(id: string) {
 </script>
 
 <template>
-  <div class="app">
+  <!--
+    移动端走**完全独立的一套界面**（src/mobile/Shell.vue + mobile/Home.vue + mobile/Room.vue），
+    跟 PC 端不共用布局 —— 不是把 PC 界面缩小，而是两套设计。
+    PC 那套「顶部七平台 + 搜索 + GitHub/设置 + 窗口按钮 + 左侧关注栏 + 五列卡片」
+    在手机宽度下无论怎么压缩都放不下。
+  -->
+  <MobileShell v-if="isMobile" />
+
+  <div v-else class="app">
     <header class="topbar" data-tauri-drag-region>
       <div class="logo" @click="go('/')">
         <span class="mark">▶</span>
@@ -146,8 +178,8 @@ function switchPlatform(id: string) {
 
       <button class="ghost round" @click="go('/settings')">设置</button>
 
-      <!-- 窗口按钮（自绘标题栏） -->
-      <div class="wctrl">
+      <!-- 窗口按钮（自绘标题栏）—— 移动端没有系统窗口，整组隐藏 -->
+      <div v-if="!isMobile" class="wctrl">
         <button class="wc" title="最小化" @click="winMin">
           <svg viewBox="0 0 12 12"><path d="M2 6h8" /></svg>
         </button>
@@ -175,6 +207,19 @@ function switchPlatform(id: string) {
     <main class="content">
       <router-view :key="$route.fullPath" />
     </main>
+
+    <!-- 移动端底部标签栏：PC 版靠顶栏切页，手机屏幕放不下，改成底部三大项 -->
+    <nav v-if="isMobile" class="tabbar">
+      <button :class="{ on: tab === 'home' }" @click="go('/')">
+        <span class="ti">🏠</span><span>首页</span>
+      </button>
+      <button :class="{ on: tab === 'follow' }" @click="go('/follow')">
+        <span class="ti">⭐</span><span>关注</span>
+      </button>
+      <button :class="{ on: tab === 'settings' }" @click="go('/settings')">
+        <span class="ti">⚙️</span><span>设置</span>
+      </button>
+    </nav>
   </div>
 </template>
 

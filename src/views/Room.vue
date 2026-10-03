@@ -563,4 +563,42 @@ function toggleFollow() {
 .d-foot button:disabled {
   opacity: 0.55;
 }
+
+/* ==================== 移动端（必须放在样式表最后） ====================
+   放在中间会被后面同名规则按「后写的赢」压掉 —— 上一版就栽在这，
+   媒体查询里写了 flex:none 却完全没生效。
+
+   PC 版是「播放器 + 右侧 288px 弹幕栏」左右分栏；手机上并排会让两边都窄到
+   没法看（实测 374px 窗口时弹幕栏还是死死的 288px、播放器只剩几十像素高），
+   所以改成上下分层：上面播放器固定 16:9，下面弹幕列表吃满剩余高度。 */
+@media (max-width: 820px) {
+  .body {
+    flex-direction: column;
+  }
+  .stage {
+    flex: none;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    padding: 0;
+  }
+  .danmu {
+    width: 100%;
+    flex: 1;
+    min-height: 0;
+    border-left: 0;
+    border-top: 1px solid var(--border);
+  }
+  /* 顶部信息栏窄屏要能换行，否则标题会把按钮挤出屏幕 */
+  .bar {
+    flex-wrap: wrap;
+    height: auto;
+    padding: 8px 12px;
+    gap: 8px;
+  }
+  /* 弹幕设置面板在窄屏上占满宽度更好点 */
+  .danmu .d-head,
+  .danmu .d-foot {
+    font-size: 13px;
+  }
+}
 </style>

@@ -390,6 +390,21 @@ watch(() => store.follows.length, loadFavStatus);
   background: var(--bg);
 }
 
+/* ==================== 移动端 ====================
+   手机上隐藏左侧关注栏 —— 关注已经是底部标签栏里独立的一页，
+   再挤在首页左侧会把卡片区压到只剩一半宽（实测 390px 时卡片只剩一列还溢出）。
+   卡片改成两列、间距放大，触控更舒服。 */
+@media (max-width: 820px) {
+  .home .side {
+    display: none;
+  }
+  .home .grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    padding: 10px;
+  }
+}
+
 /* ---------------- 左侧关注 ---------------- */
 .side {
   width: 232px;
