@@ -5,19 +5,25 @@
  * 竖屏布局严格对齐 Simple Live 的手机模型（调研结论 simple-live-mobile.md C1）：
  *   1. 播放器   固定 16:9 贴顶、铺满宽度（390 宽 ≈ 219 高），黑底不占满屏
  *   2. 主播条   一行：头像(28) + 主播名(截断) + 在线人数 + 关注按钮，≤48px
- *   3. 弹幕列表 占满剩余高度、可滚动（13px / 行高 22px）
+ *   3. 弹幕列表 占满剩余高度、可滚动
  *   4. 底部操作条 44px：弹幕开关 + 「说点什么…」+ 更多
  *
- * 为什么不再把「画质 / 全屏 / 返回」全塞进主播条：390px 宽下那一行原本挤了
- * 7 个元素（返回/主播名/在线/分区/画质/全屏/收藏），实测全屏按钮只有 38px、
- * 返回 34px，都点不准。Simple Live 的做法是——画质/线路收进底部 sheet，
- * 返回/全屏做成画面上的浮层按钮，主播条只留人。
+ * 本轮在上一版基础上的补齐（逐项差距分析见交付报告）：
+ *   - 更多 sheet 里补齐「弹幕设置」（字号/速度/不透明度/显示区域/颜色/屏蔽词），
+ *     数据直接复用 src/dmSettings.ts（与 PC 版同一份，不新建状态）；
+ *   - 补齐「画面比例：适应/拉伸/铺满」（默认适应），只用 CSS 覆盖 Player 的
+ *     object-fit，**不改 Player.vue 的 props/emits/逻辑**；
+ *   - 补齐「刷新」入口（走 onRefresh，保留斗鱼续流 setStreamRenew）；
+ *   - 画面浮层补齐「暂停/播放」「静音」两个 44px 按钮；
+ *   - 弹幕列表补齐「最新」回底按钮（用户上滑翻看时出现，对齐 Simple Live）；
+ *   - 补齐横屏左右布局（视频在左、主播条/弹幕/操作条在右栏）；
+ *   - 播放失败遮罩补「重试」按钮；单击不再误触发 Player 的暂停。
  *
- * 手势只保留 Simple Live 的那几种（调研 C4）：单击显隐控件、双击全屏、
- * 左侧竖向=亮度、右侧竖向=音量。**不做横向进度手势**——直播没有可拖的时间轴，
- * 横滑只会和系统「侧滑返回」抢事件、误触。
+ * 手势只保留 Simple Live 的那几种（调研 C4）：
+ *   单击显隐控件、双击全屏、左半屏竖向=亮度、右半屏竖向=音量（5% 步进）。
+ * **不做横向进度手势**——直播没有可拖的时间轴。
  */
-import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import {
   avatarUrl,
@@ -35,6 +41,17 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import Player from "../components/Player.vue";
 import { store } from "../store";
 import { soopMode } from "../soopMode";
+import {
+  DM_COLOR_MODES,
+  dmArea,
+  dmBlock,
+  dmColorMode,
+  dmCustom,
+  dmOn,
+  dmOpacity,
+  dmSize,
+  dmSpeed,
+} from "../dmSettings";
 
 const props = defineProps<{ platform: string; id: string }>();
 const router = useRouter();
@@ -46,17 +63,28 @@ const loading = ref(true);
 const error = ref("");
 const showMore = ref(false);
 const listRef = ref<HTMLElement | null>(null);
-/** 弹幕开关：关掉后列表区只留一行提示（Simple Live 底部操作条上的「弹幕开关」） */
-const dmOn = ref(true);
+/** 弹幕开关统一用 dmSettings.dmOn（与飞屏弹幕同源），底部操作条上的「弹」按钮控制它 */
 /** 播放器舞台：手势只挂在它上面，下方弹幕列表在另一层，滚动不受影响 */
 const stageRef = ref<HTMLElement | null>(null);
 /** 解析后的真实房间号（弹幕重试要用） */
 const rid = ref("");
 
-/* ---------------- 弹幕连接状态（三态，不再失败静默） ----------------
- * 原来 catch{} 空实现，连不上会永远显示「正在连接弹幕…」，用户分不清
- * 「没弹幕」还是「连不上」。现在分：connecting / ok / error，error 时
- * 显示原因 + 重试按钮（对齐 PC 版 views/Room.vue 的 danmuErr 做法）。 */
+/** 弹幕列表字号（对齐 Simple Live 聊天区可调字号；与飞屏字号 dmSize 相互独立） */
+const listSize = ref(Number(localStorage.getItem("junlive.dm_list_size") || 13));
+watch(listSize, (v) => localStorage.setItem("junlive.dm_list_size", String(v)));
+
+/**
+ * 画面比例（对齐 Simple Live「画面尺寸」：0 适应 / 1 拉伸 / 2 铺满）。
+ * 默认 contain（适应）——PC 版也明确要求默认适应。
+ * 只通过 :deep 覆盖 <video> 的 object-fit，不碰 Player.vue。
+ */
+const fit = ref(localStorage.getItem("junlive.fit") || "contain");
+watch(fit, (v) => localStorage.setItem("junlive.fit", v));
+const fitLabel = computed(
+  () => ({ contain: "适应", fill: "拉伸", cover: "铺满" })[fit.value] ?? "适应",
+);
+
+/* ---------------- 弹幕连接状态（三态，不再失败静默） ---------------- */
 const dmState = ref<"connecting" | "ok" | "error">("connecting");
 const dmErr = ref("");
 
@@ -64,34 +92,40 @@ const dmErr = ref("");
  * 手机要的是「整个屏幕都是画面」。全屏 = .mr fixed 铺满，舞台铺满，弹幕列表
  * 收起（弹幕由 Player 自带的飞屏层继续飘）。退出按钮必须常驻（手机没有 ESC）。
  *
- * 横屏锁：全屏 = 无条件锁横屏（用户要求：点全屏默认直接横屏，不做「看视频
- * 宽高比再决定」的条件逻辑）。screen.orientation.lock('landscape') 在 WebView
+ * 横屏锁：全屏 = 无条件锁横屏。screen.orientation.lock('landscape') 在 WebView
  * 里需要用户手势内调用；失败也不影响 CSS 全屏（失败时给「横过来看」提示兜底）。
  * 例外：若已在浏览器原生全屏里（document.fullscreenElement 存在），不重复锁。
  *
  * 系统栏：光加 CSS 类只覆盖 WebView 内部，改不了安卓的系统状态栏/导航栏；
- * 必须再调 Tauri 的窗口全屏 setFullscreen()，安卓才会进沉浸式隐藏状态栏。 */
+ * 必须再调 Tauri 的窗口全屏 setFullscreen()，安卓才会进沉浸式隐藏状态栏。
+ */
 const full = ref(false);
 /** 是否横屏。全屏锁横屏失败时（iOS / 系统锁旋转）给用户一个「转过来」的提示 */
 const landscape = ref(false);
-/** 全屏时控件是否可见（沉浸式：3 秒后自动隐藏，点一下再出来） */
+/** 控件是否可见（沉浸式：3.5 秒后自动隐藏，点一下再出来）——对齐 Simple Live 的自动隐藏 */
 const ctrlOn = ref(true);
 let ctrlTimer: number | null = null;
+
+/** 播放 / 静音状态（用于浮层按钮图标）。Player 内部 video 的 play/pause 事件不往外抛，
+ *  这里用一个轻量轮询读取真实状态，避免去改 Player.vue 的接口。 */
+const playingNow = ref(false);
+const mutedNow = ref(false);
+let stateTimer: number | null = null;
 
 function syncOrient() {
   landscape.value = window.innerWidth > window.innerHeight;
 }
 
-/** 全屏时重置「控件自动隐藏」倒计时；竖屏下不自动隐藏（没有常显的播放器控制栏可藏） */
+/** 重置「控件自动隐藏」倒计时（竖屏/全屏都适用，对齐 Simple Live 的自动隐藏） */
 function pokeCtrl() {
   ctrlOn.value = true;
   if (ctrlTimer) window.clearTimeout(ctrlTimer);
   ctrlTimer = window.setTimeout(() => {
-    if (full.value) ctrlOn.value = false;
-  }, 3000);
+    ctrlOn.value = false;
+  }, 3500);
 }
 
-/** 单击：显隐我们自己的浮层控件（返回/全屏 或 退出） */
+/** 单击：显隐浮层控件（返回/全屏/播放/静音） */
 function toggleCtrl() {
   ctrlOn.value = !ctrlOn.value;
   if (ctrlOn.value) pokeCtrl();
@@ -142,9 +176,8 @@ async function toggleFull() {
  *   单击         → 显隐浮层控件
  *   双击         → 全屏
  *   左半屏上下滑 → 亮度（仅移动端，原理见 applyBright）
- *   右半屏上下滑 → 音量
- * 竖向手势的起手点限制在屏高 25%~75%（Simple Live 做法，调研 C4）——避开顶部
- * 状态栏/通知下拉和底部导航/返回手势区，防止和系统手势打架。
+ *   右半屏上下滑 → 音量（5% 步进，对齐 Simple Live）
+ * 竖向手势的起手点限制在屏高 25%~75%（Simple Live 做法，调研 C4）。
  * 监听只挂在 .mr-stage（画面区域）上，下面弹幕列表是另一层，滚动不受影响。
  */
 const gTip = ref<{ icon: string; text: string } | null>(null);
@@ -166,6 +199,8 @@ let gStartVal = 0;
 let gMoved = false;
 /** 起手点是否落在允许的竖向区间内 */
 let gInBand = false;
+/** 本轮触摸是否落在某个浮层按钮上（落上则整轮交给按钮的 click，不走手势/点按逻辑） */
+let gOnButton = false;
 let gTipTimer: number | null = null;
 type GKind = "none" | "volume" | "bright" | "ignore";
 let gKind: GKind = "none";
@@ -180,7 +215,7 @@ function stageVideo(): HTMLVideoElement | null {
 
 /** 移动端判定：桌面窗口下没有「亮度」这个概念，亮度手势直接跳过 */
 function isMobile(): boolean {
-  return window.innerWidth <= 820;
+  return window.innerWidth <= 820 || /android|iphone|ipad|ipod/i.test(navigator.userAgent);
 }
 
 function showTip(icon: string, text: string) {
@@ -207,7 +242,6 @@ function hideTipSoon() {
  * 真机上想调系统亮度必须额外引 Tauri 插件，而本项目不引入任何新依赖。
  * 所以这里用 CSS filter: brightness() 作用在 <video> 上做近似 ——
  * 只是把画面本身调亮/调暗，改不了屏幕背光，也管不到系统其它界面。
- * 这是刻意的近似，不是 bug。桌面窗口下不做亮度手势（桌面没这个概念）。
  */
 function applyBright(v: number) {
   bright.value = Math.min(BRIGHT_MAX, Math.max(BRIGHT_MIN, v));
@@ -215,9 +249,24 @@ function applyBright(v: number) {
   if (el) el.style.filter = `brightness(${bright.value})`;
 }
 
+/** 音量按 5% 步进取整（对齐 Simple Live 的 _convertVolume） */
+function roundVolume(v: number): number {
+  return Math.min(1, Math.max(0, Math.round(v / 0.05) * 0.05));
+}
+
 function onStageTouchStart(e: TouchEvent) {
   const t = e.touches[0];
   if (!t) return;
+  // 落在浮层按钮上的触摸：整轮交给按钮自己的 click，不做手势、不做点按判定。
+  gOnButton = !!(e.target as HTMLElement)?.closest?.("button");
+  if (gOnButton) {
+    gKind = "ignore";
+    gMoved = false;
+    return;
+  }
+  // 抑制浏览器在 touchend 后合成的 click —— 否则单击会顺带触发 Player 里
+  // <video> 的 @click="toggle"，表现就是「点一下想显隐控件，结果画面暂停了」。
+  if (e.cancelable) e.preventDefault();
   gStartX = t.clientX;
   gStartY = t.clientY;
   gKind = "none";
@@ -228,6 +277,7 @@ function onStageTouchStart(e: TouchEvent) {
 }
 
 function onStageTouchMove(e: TouchEvent) {
+  if (gOnButton) return;
   const t = e.touches[0];
   if (!t) return;
   const dx = t.clientX - gStartX;
@@ -268,17 +318,17 @@ function onStageTouchMove(e: TouchEvent) {
   }
 
   if (gKind === "volume" || gKind === "bright") {
-    // 灵敏度基准用整屏高（原来用约 202px 的舞台高，拖 100px 就从 0 到满，极易误触）
+    // 灵敏度基准用整屏高；往上滑是增大，所以取 -dy；半个屏高对应调满/调到底
     const h = window.innerHeight;
-    // 往上滑是增大，所以取 -dy；滑半个屏高对应调满/调到底
     const ratio = -dy / Math.max(1, h * 0.5);
     if (gKind === "volume") {
-      const nv = Math.min(1, Math.max(0, gStartVal + ratio));
+      const nv = roundVolume(gStartVal + ratio);
       const vv = stageVideo();
       if (vv) {
-        vv.volume = nv; // 音量写 video.volume
+        vv.volume = nv;
         vv.muted = nv === 0;
       }
+      mutedNow.value = vv?.muted ?? false;
       showTip(nv === 0 ? "🔇" : "🔊", `音量 ${Math.round(nv * 100)}%`);
     } else {
       applyBright(gStartVal + ratio * (BRIGHT_MAX - BRIGHT_MIN));
@@ -289,6 +339,11 @@ function onStageTouchMove(e: TouchEvent) {
 }
 
 function onStageTouchEnd() {
+  if (gOnButton) {
+    gOnButton = false;
+    gKind = "none";
+    return;
+  }
   gKind = "none";
   hideTipSoon();
 
@@ -316,6 +371,24 @@ function onStageTouchEnd() {
   gMoved = false;
 }
 
+/* ---------------- 播放控制（浮层按钮用，操作的是 Player 内部的 <video>） ---- */
+function togglePlay() {
+  const v = stageVideo();
+  if (!v) return;
+  if (v.paused) v.play?.().catch(() => {});
+  else v.pause?.();
+  playingNow.value = !v.paused;
+  pokeCtrl();
+}
+function toggleMute() {
+  const v = stageVideo();
+  if (!v) return;
+  v.muted = !v.muted;
+  if (!v.muted && v.volume === 0) v.volume = 0.6;
+  mutedNow.value = v.muted;
+  pokeCtrl();
+}
+
 /* ------------------------------------------------------------------ 数据 */
 let unlisten: (() => void) | null = null;
 
@@ -329,12 +402,24 @@ function nearBottom(el: HTMLElement): boolean {
   return el.scrollHeight - el.scrollTop - el.clientHeight < 40;
 }
 
+/** 用户是否手动上滑翻看（此时右下角出现「最新」回底按钮，对齐 Simple Live） */
+const dmManual = ref(false);
+function onDmScroll() {
+  const el = listRef.value;
+  if (!el) return;
+  dmManual.value = !nearBottom(el);
+}
+function toBottom() {
+  dmManual.value = false;
+  scrollBottom();
+}
+
 /**
  * 收到一条弹幕。
  *
  * 关键修复（对齐 PC 版 views/Room.vue:103-107）：
  *  - **先 nextTick 再滚**：push 之后 DOM 还没渲染出新行，立刻读 scrollHeight
- *    拿到的是旧值，列表会永远停在倒数第二条（原移动端的 bug）。
+ *    拿到的是旧值，列表会永远停在倒数第二条。
  *  - 裁剪（400 → 砍 150）时如果用户正在上滑翻看，就按「被砍掉的高度」回补
  *    scrollTop，保持视觉位置不跳；只有本来就在底部才继续跟随。
  */
@@ -400,6 +485,25 @@ async function onRefresh() {
   }
 }
 
+/** 房间解析失败时的「重试」：重新拉一次 getRoom（初始 error 态没有重试入口是缺口） */
+async function retryRoom() {
+  loading.value = true;
+  error.value = "";
+  try {
+    const d = await getRoom(props.platform, rid.value || decodeURIComponent(props.id));
+    detail.value = d;
+    rid.value = d.room_id || rid.value;
+    current.value = d.plays[0] ?? null;
+    if (!d.live) error.value = "该主播当前未开播";
+    else if (!d.plays.length) error.value = "没有解析到可用的播放地址";
+    if (d.room_id) setStreamRenew(props.platform, d.room_id, current.value?.quality ?? "").catch(() => {});
+  } catch (e) {
+    error.value = String(e);
+  } finally {
+    loading.value = false;
+  }
+}
+
 function toggleFollow() {
   const d = detail.value;
   if (!d) return;
@@ -418,6 +522,13 @@ const soopOptions = [
   { v: "native", label: "自建流（画质可选）" },
   { v: "embed", label: "官方播放器控件（画质不可调）" },
   { v: "official", label: "官方完整页（带官网界面）" },
+] as const;
+
+/** 画面比例可选项（对齐 Simple Live「画面尺寸」的前三项） */
+const fitOptions = [
+  { v: "contain", label: "适应" },
+  { v: "fill", label: "拉伸" },
+  { v: "cover", label: "铺满" },
 ] as const;
 
 onMounted(async () => {
@@ -447,12 +558,23 @@ onMounted(async () => {
     /* 事件通道注册失败不影响播放 */
   }
   await connectDanmaku();
+
+  // 控件自动隐藏（对齐 Simple Live）
+  pokeCtrl();
+  // 轻量轮询 Player 内 <video> 的播放/静音状态，供浮层按钮显示图标
+  stateTimer = window.setInterval(() => {
+    const v = stageVideo();
+    if (!v) return;
+    playingNow.value = !v.paused;
+    mutedNow.value = v.muted || v.volume === 0;
+  }, 700);
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener("resize", syncOrient);
   window.removeEventListener("orientationchange", syncOrient);
   if (ctrlTimer) window.clearTimeout(ctrlTimer);
+  if (stateTimer) window.clearInterval(stateTimer);
   if (gTipTimer) window.clearTimeout(gTipTimer);
   if (tapTimer) window.clearTimeout(tapTimer);
   unlisten?.();
@@ -469,8 +591,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="mr" :class="{ full, landscape }">
-    <!-- 播放器：固定 16:9 贴顶、铺满宽度。
+  <div class="mr" :class="[full, landscape, `fit-${fit}`]">
+    <!-- 播放器：竖屏固定 16:9 贴顶；横屏时在左栏铺满高度。
          手势（单击/双击/亮度/音量）挂在这一层，只作用于画面区域。 -->
     <div
       ref="stageRef"
@@ -480,8 +602,7 @@ onBeforeUnmount(() => {
       @touchend="onStageTouchEnd"
       @touchcancel="onStageTouchEnd"
     >
-      <!-- 封面海报：拉流还没出画面时（加载中 / 未开播 / 出错）先用缩略图垫底，
-           走 thumbUrl 只拉 400px 的小图省流量；播放器一有画面就会盖住它 -->
+      <!-- 封面海报：拉流还没出画面时（加载中 / 未开播 / 出错）先用缩略图垫底 -->
       <img
         v-if="detail?.cover"
         class="mr-cover"
@@ -501,12 +622,22 @@ onBeforeUnmount(() => {
         @refresh="onRefresh"
       />
       <div v-if="loading" class="mr-veil">加载中…</div>
-      <div v-else-if="error" class="mr-veil err">{{ error }}</div>
+      <!-- 房间解析失败 / 未开播：给可点的「重试」，不再只有一行红字 -->
+      <div v-else-if="error" class="mr-veil err">
+        <div class="mr-veil-t">{{ error }}</div>
+        <button class="mr-retry" @click.stop="retryRoom">重试</button>
+      </div>
 
-      <!-- 竖屏浮层控件：返回（左）+ 全屏（右），热区 44×44。
-           单击画面可显隐。Simple Live 把返回/全屏放在画面上，而不是塞进主播条。 -->
+      <!-- 画面浮层控件，热区一律 44×44。单击画面可显隐、3.5 秒后自动隐藏。
+           竖屏：返回(左) + 全屏(右)；底部再给 播放/暂停(左) + 静音(右)。
+           全屏：退出按钮（手机没有 ESC 键）。 -->
       <template v-if="!full">
-        <button v-show="ctrlOn" class="mr-ov mr-ov-l" aria-label="返回" @click.stop="router.back()">‹</button>
+        <button
+          v-show="ctrlOn"
+          class="mr-ov mr-ov-l"
+          aria-label="返回"
+          @click.stop="router.back()"
+        >‹</button>
         <button
           v-show="ctrlOn"
           class="mr-ov mr-ov-r"
@@ -519,67 +650,94 @@ onBeforeUnmount(() => {
           </svg>
         </button>
       </template>
-
-      <!-- 全屏退出入口：手机没有 ESC 键，必须有可见、点得到的按钮（热区 44）。
-           沉浸式：3 秒后自动淡出，点屏幕任意位置再出来。 -->
-      <button v-else class="mr-exit" :class="{ gone: !ctrlOn }" @click.stop="toggleFull">✕ 退出全屏</button>
-    </div>
-
-    <!-- 主播条：一行，≤48px。只放 头像 + 主播名 + 在线人数 + 关注。
-         画质/全屏/返回都已经挪走（见上），390px 下不再挤爆。 -->
-    <div v-if="!full" class="mr-bar">
-      <img
-        v-if="detail?.avatar"
-        class="mr-ava"
-        :src="avatarUrl(props.platform, detail.avatar)"
-        referrerpolicy="no-referrer"
-        alt=""
-        @error="coverErr"
-      />
-      <div v-else class="mr-ava mr-ava-ph">{{ (detail?.streamer || "?").slice(0, 1) }}</div>
-      <div class="mr-meta">
-        <div class="mr-name">{{ detail?.streamer || "-" }}</div>
-      </div>
-      <span v-if="detail?.online" class="mr-online">👁 {{ detail.online }}</span>
       <button
-        class="mr-fav"
-        :class="{ on: detail && store.isFollowed(props.platform, detail.room_id) }"
-        @click="toggleFollow"
-      >
-        <span class="mr-fav-i">{{ detail && store.isFollowed(props.platform, detail.room_id) ? "★" : "☆" }}</span>
-        <span class="mr-fav-t">{{ detail && store.isFollowed(props.platform, detail.room_id) ? "已关注" : "关注" }}</span>
-      </button>
+        v-else
+        class="mr-exit"
+        :class="{ gone: !ctrlOn }"
+        @click.stop="toggleFull"
+      >✕ 退出全屏</button>
+
+      <!-- 播放/暂停：隐藏了 Player 那套 18~31px 的桌面控制栏，播放控制由这两个 44px 浮层按钮接管 -->
+      <button
+        v-show="ctrlOn"
+        class="mr-ov mr-ov-bl"
+        :aria-label="playingNow ? '暂停' : '播放'"
+        @click.stop="togglePlay"
+      >{{ playingNow ? "❚❚" : "▶" }}</button>
+      <button
+        v-show="ctrlOn"
+        class="mr-ov mr-ov-br"
+        :aria-label="mutedNow ? '取消静音' : '静音'"
+        @click.stop="toggleMute"
+      >{{ mutedNow ? "🔇" : "🔊" }}</button>
     </div>
 
-    <!-- 弹幕列表：占满剩余高度，可滚动（13px / 行高 22px） -->
-    <div v-if="!full" ref="listRef" class="mr-dm">
-      <div v-if="!dmOn" class="mr-dm-empty">弹幕已关闭</div>
-      <template v-else>
-        <div v-if="detail && !detail.live" class="mr-dm-empty">主播未开播，没有弹幕</div>
-        <div v-else-if="dmState === 'error'" class="mr-dm-empty err">
-          <div class="mr-dm-err-t">弹幕连接失败</div>
-          <div class="mr-dm-reason">{{ dmErr }}</div>
-          <button class="mr-retry" @click="connectDanmaku">重试</button>
+    <!-- 侧栏：竖屏在画面下方（上下排列）；横屏在右侧一栏（左右排列）。
+         内容 = 主播条 + 弹幕列表 + 底部操作条。 -->
+    <div v-if="!full" class="mr-side">
+      <!-- 主播条：一行，≤48px。头像 + 主播名 + 在线人数 + 关注。 -->
+      <div class="mr-bar">
+        <img
+          v-if="detail?.avatar"
+          class="mr-ava"
+          :src="avatarUrl(props.platform, detail.avatar)"
+          referrerpolicy="no-referrer"
+          alt=""
+          @error="coverErr"
+        />
+        <div v-else class="mr-ava mr-ava-ph">{{ (detail?.streamer || "?").slice(0, 1) }}</div>
+        <div class="mr-meta">
+          <div class="mr-name">{{ detail?.streamer || "-" }}</div>
         </div>
-        <div v-else-if="!msgs.length" class="mr-dm-empty">
-          {{ dmState === "connecting" ? "正在连接弹幕…" : "已连接，等待弹幕…" }}
-        </div>
-        <div v-for="(m, i) in msgs" :key="`${m.ts}-${i}`" class="mr-dm-row">
-          <span class="mr-dm-u" :style="m.color && m.color !== '#ffffff' ? { color: m.color } : {}">{{ m.user }}</span>
-          <span class="mr-dm-t">{{ m.text }}</span>
-        </div>
-      </template>
+        <span v-if="detail?.online" class="mr-online">👁 {{ detail.online }}</span>
+        <button
+          class="mr-fav"
+          :class="{ on: detail && store.isFollowed(props.platform, detail.room_id) }"
+          @click="toggleFollow"
+        >
+          <span class="mr-fav-i">{{ detail && store.isFollowed(props.platform, detail.room_id) ? "★" : "☆" }}</span>
+          <span class="mr-fav-t">{{ detail && store.isFollowed(props.platform, detail.room_id) ? "已关注" : "关注" }}</span>
+        </button>
+      </div>
+
+      <!-- 弹幕列表：占满剩余高度，可滚动 -->
+      <div ref="listRef" class="mr-dm" @scroll.passive="onDmScroll">
+        <template v-if="!dmOn">
+          <div class="mr-dm-empty">弹幕已关闭</div>
+        </template>
+        <template v-else>
+          <div v-if="detail && !detail.live" class="mr-dm-empty">主播未开播，没有弹幕</div>
+          <div v-else-if="dmState === 'error'" class="mr-dm-empty err">
+            <div class="mr-dm-err-t">弹幕连接失败</div>
+            <div class="mr-dm-reason">{{ dmErr }}</div>
+            <button class="mr-retry" @click="connectDanmaku">重试</button>
+          </div>
+          <div v-else-if="!msgs.length" class="mr-dm-empty">
+            {{ dmState === "connecting" ? "正在连接弹幕…" : "已连接，等待弹幕…" }}
+          </div>
+          <div
+            v-for="(m, i) in msgs"
+            :key="`${m.ts}-${i}`"
+            class="mr-dm-row"
+            :style="{ fontSize: listSize + 'px', lineHeight: listSize + 9 + 'px' }"
+          >
+            <span class="mr-dm-u" :style="m.color && m.color !== '#ffffff' ? { color: m.color } : {}">{{ m.user }}</span>
+            <span class="mr-dm-t">{{ m.text }}</span>
+          </div>
+        </template>
+        <!-- 「最新」回底按钮：用户上滑翻看时出现（对齐 Simple Live） -->
+        <button v-if="dmManual && msgs.length" class="mr-latest" @click="toBottom">最新 ↓</button>
+      </div>
+
+      <!-- 底部操作条：44px。左「弹幕开关」+ 中「说点什么…」+ 右「更多」 -->
+      <div class="mr-acts">
+        <button class="mr-act mr-act-dm" :class="{ off: !dmOn }" aria-label="弹幕开关" @click="dmOn = !dmOn">弹</button>
+        <button class="mr-act-input" @click="promptDm">说点什么…</button>
+        <button class="mr-act mr-act-more" aria-label="更多" @click="showMore = true">更多</button>
+      </div>
     </div>
 
-    <!-- 底部操作条：44px。左「弹幕开关」+ 中「说点什么…」+ 右「更多」 -->
-    <div v-if="!full" class="mr-acts">
-      <button class="mr-act mr-act-dm" :class="{ off: !dmOn }" aria-label="弹幕开关" @click="dmOn = !dmOn">弹</button>
-      <button class="mr-act-input" @click="promptDm">说点什么…</button>
-      <button class="mr-act mr-act-more" aria-label="更多" @click="showMore = true">更多</button>
-    </div>
-
-    <!-- 手势浮层：居中，fixed 定位不参与布局、pointer-events:none 不拦触摸。
-         z-index 8050 —— 高于全屏舞台(8000)，低于退出按钮(8100)，退出键始终可点 -->
+    <!-- 手势浮层：居中，fixed 定位不参与布局、pointer-events:none 不拦触摸 -->
     <div v-if="gTip" class="mr-gesture">
       <span class="mr-gesture-i">{{ gTip.icon }}</span>
       <span class="mr-gesture-t">{{ gTip.text }}</span>
@@ -591,20 +749,76 @@ onBeforeUnmount(() => {
       <span>横过来看，画面更足</span>
     </div>
 
-    <!-- 更多：底部 sheet。分组列出 画质 + 播放方式（仅 SOOP） -->
+    <!-- 更多 sheet：画质/线路 + 画面比例 + 弹幕设置 + 刷新 +（SOOP）播放方式 -->
     <div v-if="showMore" class="mr-sheet" @click.self="showMore = false">
       <div class="mr-sheet-in">
-        <div class="mr-sheet-head">画质</div>
+        <div class="mr-sheet-head">画质 / 线路</div>
         <button
           v-for="p in detail?.plays ?? []"
           :key="p.url"
           class="mr-sheet-item"
-          :class="{ on: p.quality === current?.quality }"
+          :class="{ on: p.url === current?.url }"
           @click="pick(p)"
         >
-          {{ p.quality }}<span v-if="p.quality === current?.quality" class="tick">✓</span>
+          {{ p.quality }}<span class="fmt">{{ (p.format || "").toUpperCase() }}</span
+          ><span v-if="p.url === current?.url" class="tick">✓</span>
         </button>
         <div v-if="!detail?.plays?.length" class="mr-sheet-empty">没有可选的画质</div>
+
+        <div class="mr-sheet-head">画面比例（当前：{{ fitLabel }}）</div>
+        <div class="mr-sheet-seg">
+          <button
+            v-for="o in fitOptions"
+            :key="o.v"
+            class="mr-seg-item"
+            :class="{ on: fit === o.v }"
+            @click="fit = o.v"
+          >{{ o.label }}</button>
+        </div>
+
+        <div class="mr-sheet-head">弹幕设置</div>
+        <div class="mr-set-row">
+          <span class="mr-set-l">显示弹幕</span>
+          <input v-model="dmOn" type="checkbox" class="mr-switch" />
+        </div>
+        <label class="mr-set-row">
+          <span class="mr-set-l">字号 {{ dmSize }}</span>
+          <input v-model.number="dmSize" type="range" min="12" max="34" step="1" class="mr-range" />
+        </label>
+        <label class="mr-set-row">
+          <span class="mr-set-l">速度 {{ dmSpeed }}s</span>
+          <input v-model.number="dmSpeed" type="range" min="4" max="18" step="1" class="mr-range" />
+        </label>
+        <label class="mr-set-row">
+          <span class="mr-set-l">不透明度 {{ Math.round(dmOpacity * 100) }}%</span>
+          <input v-model.number="dmOpacity" type="range" min="0.2" max="1" step="0.05" class="mr-range" />
+        </label>
+        <div class="mr-set-row">
+          <span class="mr-set-l">显示区域</span>
+          <select v-model.number="dmArea" class="mr-sel">
+            <option :value="0.25">1/4</option>
+            <option :value="0.5">1/2</option>
+            <option :value="0.75">3/4</option>
+            <option :value="1">全屏</option>
+          </select>
+        </div>
+        <div class="mr-set-row">
+          <span class="mr-set-l">弹幕颜色</span>
+          <span class="mr-colwrap">
+            <select v-model="dmColorMode" class="mr-sel">
+              <option v-for="m in DM_COLOR_MODES" :key="m.id" :value="m.id">{{ m.name }}</option>
+            </select>
+            <input v-if="dmColorMode === 'custom'" v-model="dmCustom" type="color" class="mr-color" />
+          </span>
+        </div>
+        <label class="mr-set-row">
+          <span class="mr-set-l">列表字号 {{ listSize }}</span>
+          <input v-model.number="listSize" type="range" min="12" max="20" step="1" class="mr-range" />
+        </label>
+        <label class="mr-set-row">
+          <span class="mr-set-l">屏蔽词</span>
+          <input v-model="dmBlock" class="mr-text" placeholder="逗号分隔，命中不显示" />
+        </label>
 
         <template v-if="isSoop()">
           <div class="mr-sheet-head">播放方式</div>
@@ -618,6 +832,11 @@ onBeforeUnmount(() => {
             {{ o.label }}<span v-if="soopMode === o.v" class="tick">✓</span>
           </button>
         </template>
+
+        <div class="mr-sheet-head">其他</div>
+        <button class="mr-sheet-item" @click="onRefresh(); showMore = false">
+          刷新直播<span class="tick">↻</span>
+        </button>
       </div>
     </div>
   </div>
@@ -632,8 +851,7 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
-/* 16:9 贴顶、铺满宽度。max-height 兜底：极扁视口（横屏手机/窄窗口）下不让舞台
-   按宽度撑破屏幕、把下面的弹幕挤成 0。 */
+/* 16:9 贴顶、铺满宽度。max-height 兜底：极扁视口下不让舞台按宽度撑破屏幕。 */
 .mr-stage {
   position: relative;
   width: 100%;
@@ -645,6 +863,25 @@ onBeforeUnmount(() => {
   user-select: none;
   -webkit-touch-callout: none;
 }
+
+/* ---------- 画面比例（对齐 Simple Live「画面尺寸」0/1/2）----------
+   只覆盖 Player 内 <video> 的 object-fit，不动 Player.vue 的代码。
+   .vid 默认 contain（适应）就是 Player.vue 里的样式，另两种在这里加。 */
+.mr.fit-fill :deep(.vid) {
+  object-fit: fill;
+}
+.mr.fit-cover :deep(.vid) {
+  object-fit: cover;
+}
+
+/* ---------- 隐藏 Player 自带的桌面控制栏 ----------
+   Player.vue 的 .ctrl 是为鼠标设计的（暂停/音量/线路/画质，实测按钮仅 18~31px），
+   219px 高的手机舞台放不下也点不准；播放控制改由 Room 自己的 44px 浮层按钮接管。
+   注意只隐藏 .ctrl；embed 平台的 .embed-tools 保留（官方播放器自有控件）。 */
+.mr :deep(.ctrl) {
+  display: none !important;
+}
+
 /* 封面海报：铺满舞台，垫在播放器 / 加载遮罩下面 */
 .mr-cover {
   position: absolute;
@@ -658,22 +895,26 @@ onBeforeUnmount(() => {
   position: absolute;
   inset: 0;
   display: flex;
+  flex-direction: column;
+  gap: 12px;
   align-items: center;
   justify-content: center;
   color: #fff;
   font-size: 13px;
   background: rgba(0, 0, 0, 0.5);
+  z-index: 15;
 }
-.mr-veil.err {
-  color: #ffb4b4;
+.mr-veil-t {
   padding: 0 20px;
   text-align: center;
 }
+.mr-veil.err {
+  color: #ffb4b4;
+}
 
-/* 画面上的浮层按钮（返回 / 全屏）：热区 44×44，半透明黑底保证在任何画面上可读 */
+/* 画面上的浮层按钮（返回/全屏/播放/静音）：热区 44×44 */
 .mr-ov {
   position: absolute;
-  top: calc(6px + env(safe-area-inset-top, 0));
   width: 44px;
   height: 44px;
   display: flex;
@@ -683,7 +924,7 @@ onBeforeUnmount(() => {
   border-radius: 22px;
   background: rgba(0, 0, 0, 0.45);
   color: #fff;
-  font-size: 26px;
+  font-size: 22px;
   line-height: 1;
   z-index: 20;
 }
@@ -691,10 +932,29 @@ onBeforeUnmount(() => {
   background: rgba(0, 0, 0, 0.7);
 }
 .mr-ov-l {
+  top: calc(6px + env(safe-area-inset-top, 0));
   left: 6px;
+  font-size: 26px;
 }
 .mr-ov-r {
+  top: calc(6px + env(safe-area-inset-top, 0));
   right: 6px;
+}
+.mr-ov-bl {
+  left: 6px;
+  bottom: 6px;
+}
+.mr-ov-br {
+  right: 6px;
+  bottom: 6px;
+}
+
+/* 侧栏：竖屏时在画面下方上下排列 */
+.mr-side {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 /* 主播条：一行 ≤48px */
@@ -766,10 +1026,7 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-/* ---------- 全屏（铺满） ----------
-   整个 .mr 变成全屏定位，舞台铺满，常规的信息条/弹幕列表/操作条隐藏，
-   弹幕交给 Player 组件自带的飞屏层（它本来就浮在视频上面）。
-   横屏锁由 toggleFull 按视频流宽高比决定。 */
+/* ---------- 全屏（铺满） ---------- */
 .mr.full {
   position: fixed;
   inset: 0;
@@ -784,15 +1041,33 @@ onBeforeUnmount(() => {
   max-height: none;
   aspect-ratio: auto;
 }
-
-/* 横屏全屏：把播放器容器强制铺满 viewport（100vw × 100vh）。
-   Player 自带的飞屏弹幕层是相对播放器 inset:0 的，只有容器铺满它才跟着铺满整屏。
-   为什么只在横屏铺满：手机横屏时 16:9 画面刚好吃掉整屏；纵屏若也铺满，16:9 会
-   被拉扁、或因 object-fit: contain 留出很宽黑边，弹幕飘在黑边上很突兀。 */
+/* 横屏全屏：把播放器容器强制铺满 viewport（100vw × 100vh）。 */
 .mr.full.landscape .mr-stage :deep(.player) {
   width: 100vw;
   height: 100vh;
   border-radius: 0;
+}
+
+/* ---------- 横屏（非全屏）：视频在左、侧栏在右（对齐 Simple Live 平板/横屏布局）----
+   横屏时把 .mr 从「上下」改成「左右」：舞台铺满左栏高度，右侧固定 300px 放
+   主播条 + 弹幕 + 操作条。竖屏时这套规则不生效。 */
+@media (orientation: landscape) {
+  .mr:not(.full) {
+    flex-direction: row;
+  }
+  .mr:not(.full) .mr-stage {
+    flex: 1;
+    width: auto;
+    height: 100%;
+    max-height: none;
+    aspect-ratio: auto;
+  }
+  .mr:not(.full) .mr-side {
+    width: 300px;
+    flex: none;
+    height: 100%;
+    border-left: 1px solid var(--border);
+  }
 }
 
 /* 全屏退出按钮：热区 ≥44 */
@@ -811,7 +1086,6 @@ onBeforeUnmount(() => {
   font-size: 13px;
   transition: opacity 0.25s;
 }
-/* 沉浸式：3 秒后淡出，不挡画面 */
 .mr-exit.gone {
   opacity: 0;
   pointer-events: none;
@@ -867,15 +1141,14 @@ onBeforeUnmount(() => {
   60%, 100% { transform: rotate(90deg); }
 }
 
-/* 弹幕列表：占满剩余高度，13px / 行高 22px */
+/* 弹幕列表：占满剩余高度（字号/行高由内联 style 按设置决定） */
 .mr-dm {
+  position: relative;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   padding: 6px 12px 12px;
-  font-size: 13px;
-  line-height: 22px;
 }
 .mr-dm-empty {
   padding: 20px;
@@ -916,6 +1189,22 @@ onBeforeUnmount(() => {
 }
 .mr-dm-t {
   color: var(--fg-2);
+}
+/* 「最新」回底按钮：贴在弹幕区右下角，热区 ≥44 */
+.mr-latest {
+  position: sticky;
+  bottom: 8px;
+  left: 100%;
+  transform: translateX(-8px);
+  min-width: 44px;
+  height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--border-2);
+  border-radius: 22px;
+  background: var(--panel);
+  color: var(--brand);
+  font-size: 13px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
 }
 
 /* 底部操作条：44px（+ 底部安全区） */
@@ -972,11 +1261,11 @@ onBeforeUnmount(() => {
   background: var(--panel);
   border-radius: 14px 14px 0 0;
   padding: 8px 0 calc(8px + env(safe-area-inset-bottom, 0));
-  max-height: 70vh;
+  max-height: 80vh;
   overflow-y: auto;
 }
 .mr-sheet-head {
-  padding: 10px 18px;
+  padding: 12px 18px 6px;
   font-size: 13px;
   color: var(--fg-dim);
 }
@@ -988,6 +1277,7 @@ onBeforeUnmount(() => {
 .mr-sheet-item {
   display: flex;
   align-items: center;
+  gap: 8px;
   width: 100%;
   min-height: 44px;
   height: 48px;
@@ -1002,7 +1292,86 @@ onBeforeUnmount(() => {
   color: var(--brand);
   font-weight: 600;
 }
+.mr-sheet-item .fmt {
+  font-size: 11px;
+  color: var(--fg-dim);
+}
 .mr-sheet-item .tick {
   margin-left: auto;
+}
+
+/* 画面比例分段控件 */
+.mr-sheet-seg {
+  display: flex;
+  gap: 8px;
+  padding: 0 18px 6px;
+}
+.mr-seg-item {
+  flex: 1;
+  height: 44px;
+  border: 1px solid var(--border-2);
+  border-radius: 8px;
+  background: var(--chip);
+  color: var(--fg-2);
+  font-size: 14px;
+}
+.mr-seg-item.on {
+  border-color: var(--brand);
+  color: var(--brand);
+  font-weight: 600;
+}
+
+/* 弹幕设置行：每行 ≥44 高，保证滑块/开关也有足够触控高度 */
+.mr-set-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  padding: 0 18px;
+  font-size: 14px;
+  color: var(--fg-2);
+}
+.mr-set-l {
+  flex-shrink: 0;
+  min-width: 96px;
+}
+.mr-range {
+  flex: 1;
+  height: 44px; /* 让 range 的命中区达到 44 高 */
+  accent-color: var(--brand);
+}
+.mr-switch {
+  width: 44px;
+  height: 28px;
+  accent-color: var(--brand);
+}
+.mr-sel,
+.mr-text {
+  flex: 1;
+  min-width: 0;
+  height: 44px;
+  padding: 0 10px;
+  border: 1px solid var(--border-2);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 15px;
+}
+.mr-text {
+  font-size: 16px; /* ≥16 防止 iOS 聚焦缩放 */
+}
+.mr-colwrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+.mr-color {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--border-2);
+  border-radius: 8px;
+  background: transparent;
 }
 </style>

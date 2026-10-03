@@ -32,11 +32,25 @@ export function isEmbedPlatform(p?: string): boolean {
   return EMBED_PLATFORMS.includes(p);
 }
 
-/** 父页面 host —— Twitch 的 embed 要求 parent 和嵌入页同域，否则拒绝渲染 */
+/**
+ * 父页面 host —— Twitch 的 embed 要求 `parent` 与嵌入页同域，否则拒绝渲染。
+ *
+ * ⚠️ 这里踩过一个坑：原来写的是
+ *   `if (h && !h.includes("tauri")) return h;  return "localhost"`
+ * 而 Tauri 的 hostname 恰恰就是 `tauri.localhost`（安卓是 `tauri.localhost`
+ * 或 `localhost`），所以 `!h.includes("tauri")` 永远为假，**永远返回
+ * "localhost"**。结果 Twitch 在桌面端拿到的 parent 和真实域名不匹配，直接拒绝。
+ *
+ * 现在按「Twitch 允许的特例」处理：Tauri 的 origin 落在
+ * `tauri.localhost` / `localhost` 这两个值时，直接原样交给 Twitch ——
+ * 桌面端与安卓端都能对上。
+ */
 export function parentHost(): string {
   try {
-    const h = window.location.hostname;
-    if (h && !h.includes("tauri")) return h;
+    const h = (window.location.hostname || "").trim();
+    // Tauri 各平台可能给的值：tauri.localhost / localhost / 127.0.0.1
+    if (h === "tauri.localhost" || h === "localhost" || h === "127.0.0.1") return h;
+    if (h) return h;
   } catch {
     /* 忽略 */
   }
