@@ -1,0 +1,89 @@
+name: Release
+
+# 打 tag（v1.2.3）就自动出三平台安装包；也可以在 Actions 页面手动触发
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS：Apple Silicon + Intel 各出一个包
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+          - platform: macos-latest
+            target: x86_64-apple-darwin
+          # Linux：deb / rpm / AppImage
+          - platform: ubuntu-22.04
+            target: ""
+          # Windows：NSIS 安装包 + MSI
+          - platform: windows-latest
+            target: ""
+
+    runs-on: ${{ matrix.platform }}
+
+    # 项目里 src-tauri/rust-toolchain.toml 把工具链固定在
+    # stable-x86_64-pc-windows-gnu（本地开发机没装 Windows SDK 才这么写）。
+    # CI 上要用各平台默认的 MSVC / 系统工具链，用这个环境变量覆盖掉它
+    # （rustup 的优先级：RUSTUP_TOOLCHAIN > rust-toolchain.toml > default）。
+    env:
+      RUSTUP_TOOLCHAIN: stable
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: 安装 Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: 缓存 Rust 编译产物
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: 安装 Linux 系统依赖
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: 安装前端依赖
+        run: npm ci
+
+      - name: 构建并发布
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_type == 'tag' && github.ref_name || 'v0.1.0' }}
+          releaseName: "JunLive ${{ github.ref_type == 'tag' && github.ref_name || 'v0.1.0' }}"
+          releaseBody: |
+            多平台直播聚合桌面客户端（斗鱼 / 虎牙 / 哔哩哔哩 / 抖音 / YouTube / SOOP / Twitch）。
+
+            下载对应系统的安装包：
+            - **Windows**：`.msi`（MSI 安装包）或 `-setup.exe`（NSIS 安装包）
+            - **macOS**：`.dmg`（Apple Silicon 选 `aarch64`，Intel 选 `x64`）
+            - **Linux**：`.AppImage`（免安装）/ `.deb`（Debian、Ubuntu）/ `.rpm`（Fedora、RHEL）
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.target && format('--target {0}', matrix.target) || '' }}

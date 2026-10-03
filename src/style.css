@@ -1,0 +1,144 @@
+:root {
+  /* 浅色主题（对齐斗鱼 PC 客户端） */
+  --bg: #f7f8fa;
+  --panel: #ffffff;
+  --card: #ffffff;
+  --chip: #f4f5f7;
+  --chip-hover: #edeef0;
+  --border: #f0f0f0;
+  --border-2: #e5e6eb;
+  --fg: #1f2329;
+  --fg-2: #4e5969;
+  --fg-dim: #86909c;
+  --fg-mute: #c0c4cc;
+
+  /* 品牌色：跟随当前平台（App.vue 里动态设置） */
+  --brand: #ff5d23;
+  --brand-soft: rgba(255, 93, 35, 0.1);
+  --accent: #ff5d23;
+
+  --green: #00c853;
+
+  /* 兼容早期组件用过的变量名 */
+  --bg-2: #ffffff;
+  --bg-3: #f4f5f7;
+  --bg-4: #edeef0;
+  --danger: #f53f3f;
+  --shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.06);
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", system-ui, sans-serif;
+  font-size: 14px;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--fg-2);
+  background: var(--chip);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 6px 14px;
+  cursor: pointer;
+  transition: background 0.14s, color 0.14s, border-color 0.14s, transform 0.08s;
+}
+button:hover {
+  background: var(--chip-hover);
+  color: var(--fg);
+}
+button:active {
+  transform: scale(0.97);
+}
+button.primary {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #fff;
+}
+button.primary:hover {
+  filter: brightness(1.06);
+  background: var(--brand);
+  color: #fff;
+}
+button.ghost {
+  background: transparent;
+  border-color: var(--border-2);
+  color: var(--fg-2);
+}
+button.ghost:hover {
+  background: var(--chip);
+  color: var(--fg);
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+button:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+}
+
+input,
+select {
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--fg);
+  background: var(--chip);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 7px 14px;
+  outline: none;
+  transition: background 0.14s, box-shadow 0.14s;
+}
+input::placeholder {
+  color: var(--fg-mute);
+}
+input:focus,
+select:focus {
+  background: #fff;
+  box-shadow: 0 0 0 2px var(--brand-soft), inset 0 0 0 1px var(--brand);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: #dcdfe6;
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #c9cdd4;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
