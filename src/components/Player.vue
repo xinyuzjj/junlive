@@ -22,7 +22,18 @@ const props = defineProps<{
   platform?: string;
   roomId?: string;
 }>();
-const emit = defineEmits<{ (e: "pick", p: PlayUrl): void }>();
+const emit = defineEmits<{
+  (e: "pick", p: PlayUrl): void;
+  /**
+   * 播放地址失效，需要上层重新解析。
+   *
+   * **所有平台的播放地址都是有时效的**（斗鱼 300 秒、B站带 expires 参数、
+   * SOOP 的 aid、Twitch 的 usher token……），过期后分片一律 403/断流。
+   * 表现就是「看几分钟自己结束」，而原地重试（startLoad）用的是**旧地址**，
+   * 怎么重试都没用。所以必须往上报，让上层拿新地址回来。
+   */
+  (e: "refresh"): void;
+}>();
 
 /**
  * YouTube / Twitch 走「官方 iframe 播放器」而不是自己拉流 —— 原因见 ../embed.ts。
@@ -389,6 +400,9 @@ function attach(p: PlayUrl | null) {
     );
     player.attachMediaElement(v);
     player.on(mpegts.Events.ERROR, (_t: unknown, d: unknown) => {
+      // 同样是地址过期占多数（斗鱼的 FLV 地址 300 秒就失效），
+      // 原地重连没用，得重新解析。
+      askRefresh("FLV 断流");
       err.value = `FLV 播放出错：${String(d)}`;
     });
     player.load();
@@ -436,12 +450,15 @@ function attach(p: PlayUrl | null) {
       (_e: unknown, data: { fatal: boolean; type: string; details: string }) => {
         if (!data.fatal) return;
         if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-          if (retried++ < 5) {
+          // 先原地重试几次（偶发丢包有用）
+          if (retried++ < 3) {
             status.value = `网络错误，第 ${retried} 次重试…`;
             h.startLoad();
             return;
           }
-          err.value = "网络连接失败，请检查代理或稍后重试";
+          // 重试还不行 —— 大概率是播放地址过期了（时效就是几分钟），
+          // 原地重试永远用的是旧地址，必须向上层要一份新的。
+          askRefresh("网络中断");
         } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
           status.value = "解码错误，恢复中…";
           h.recoverMediaError();
@@ -460,6 +477,27 @@ function attach(p: PlayUrl | null) {
   } else {
     err.value = "当前环境不支持 HLS 播放";
   }
+}
+
+/**
+ * 向上层要一份新的播放地址。
+ *
+ * 所有平台的地址都带时效（斗鱼 300s、B站 expires、SOOP aid、Twitch token），
+ * 过期后原地重试（hls.startLoad()）用的还是旧地址，怎么试都没用 ——
+ * 必须让上层重新解析一次房间。
+ *
+ * 限流很重要：一次断流会连着抛好几个致命错误，不拦的话会把上层刷爆，
+ * 而重新解析是要发网络请求的，反复打断反而更慢。
+ */
+let askedAt = 0;
+function askRefresh(why: string) {
+  const now = Date.now();
+  if (now - askedAt < 8000) return;
+  askedAt = now;
+  retried = 0;
+  err.value = "";
+  status.value = `${why}，正在重新解析地址…`;
+  emit("refresh");
 }
 
 function reload() {

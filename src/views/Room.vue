@@ -6,6 +6,7 @@ import {
   getRoom,
   startDanmaku,
   stopDanmaku,
+  setStreamRenew,
   type DanmakuMsg,
   type PlayUrl,
   type RoomDetail,
@@ -86,6 +87,8 @@ onMounted(async () => {
     if (!d.live) error.value = "该主播当前未开播";
     else if (!d.plays.length && !isEmbed.value)
       error.value = "没有解析到可用的播放地址";
+    // 登记续流上下文：地址到期后代理自己续，播放器无感（详见 api.ts 的注释）
+    syncRenew();
   } catch (e) {
     error.value = String(e);
   } finally {
@@ -111,11 +114,51 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   unlisten?.();
   stopDanmaku().catch(() => {});
+  // 离开播放页要清掉续流上下文，否则代理会一直为旧房间续流
+  setStreamRenew("", "", "").catch(() => {});
   ro?.disconnect();
 });
 
 function pick(p: PlayUrl) {
   current.value = p;
+  // 换画质/线路要同步更新续流上下文，否则地址到期后代理会按旧画质续，
+  // 把用户的画质选择悄悄改回去。
+  if (detail.value) {
+    setStreamRenew(props.platform, detail.value.room_id, p.quality).catch(() => {});
+  }
+}
+
+/**
+ * 播放地址续期：代理层需要知道「拿什么参数去重新解析」。
+ * 地址到期（斗鱼 300 秒）时代理自己会用这个上下文取新地址，播放器不用重载。
+ */
+function syncRenew() {
+  const d = detail.value;
+  const q = current.value?.quality ?? "";
+  if (d && !isEmbed.value) {
+    setStreamRenew(props.platform, d.room_id, q).catch(() => {});
+  } else {
+    setStreamRenew("", "", "").catch(() => {});
+  }
+}
+
+/**
+ * 播放器报「地址失效」时进来：重新解析房间，把新地址换上去。
+ * 代理层的自动续流能覆盖大部分情况（尤其斗鱼 FLV），
+ * 但 HLS（B站等）走的是另一条链路，得靠这里兜底。
+ */
+async function onRefresh() {
+  try {
+    const d = await getRoom(props.platform, detail.value?.room_id || decodeURIComponent(props.id));
+    detail.value = d;
+    if (!d.plays.length) return;
+    const q = current.value?.quality;
+    const next = d.plays.find((p) => p.quality === q) ?? d.plays[0];
+    current.value = { ...next };
+    syncRenew();
+  } catch {
+    /* 解析失败就维持原样，播放器那边会显示错误 */
+  }
 }
 
 function toggleFollow() {
@@ -181,6 +224,7 @@ function toggleFollow() {
             :platform="props.platform"
             :room-id="props.id"
             @pick="pick"
+            @refresh="onRefresh"
           />
 
           <div v-if="loading" class="veil">

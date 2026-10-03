@@ -116,6 +116,67 @@ pub fn wrap_flv(url: &str, headers: Vec<(String, String)>, proxy: bool) -> Strin
     wrap_ex(url, headers, proxy, true)
 }
 
+// ===================== 续流（流地址到期后自愈） =====================
+//
+// 所有平台的流地址都带时效，**斗鱼最狠：固定 300 秒，到点 CDN 主动 EOF**
+// （与网络无关，有些线路 URL 甚至不带 expire 参数也照样准时断 —— 是服务端策略）。
+// 表现就是「看 5 分钟自己结束」。
+//
+// 参考 DTV 的做法（src-tauri/src/flv_relay.rs）：让**代理层**自己续流，
+// 播放器完全无感。区别是 DTV 会在旧流到期前**预取**下一条并在 tag 边界接续；
+// 我们这里更简单——重连时**重新解析一次地址**再连，播放器那边看到的是
+// 「先是卡一下，然后继续播」，不会断掉。
+//
+// 之所以能接着播：斗鱼的 FLV tag 用的是**推流会话的绝对时间戳**，
+// 重新取流后时间轴是延续的，不用改写。只要剥掉新流的 FLV 文件头即可
+// （见下面 FlvState 的处理）。
+
+/// 续流所需的上下文：拿什么参数去重新解析
+#[derive(Clone, Debug)]
+pub struct RenewCtx {
+    pub platform: String,
+    pub room_id: String,
+    /// 画质名（各平台自己的叫法），重新解析后按它挑回原来那档
+    pub quality: String,
+}
+
+static RENEW: Mutex<Option<RenewCtx>> = Mutex::new(None);
+
+/// 登记续流上下文。传 None 清除（切房间/关播放器时调用）。
+pub fn set_renew(ctx: Option<RenewCtx>) {
+    *RENEW.lock().unwrap() = ctx;
+}
+
+fn renew_ctx() -> Option<RenewCtx> {
+    RENEW.lock().unwrap().clone()
+}
+
+/// 用续流上下文重新解析一次地址，挑回同一画质。
+/// 失败就返回 None（调用方继续用旧地址，至少不比现在更差）。
+/// 供 `flv_renew`（斗鱼 FLV 续流）复用。
+pub(crate) async fn resolve_renew_url() -> Option<String> {
+    let quality = renew_ctx().map(|c| c.quality).unwrap_or_default();
+    resolve_fresh_url(&quality).await
+}
+
+async fn resolve_fresh_url(quality: &str) -> Option<String> {
+    let ctx = renew_ctx()?;
+    let plays = match ctx.platform.as_str() {
+        "douyu" => crate::platforms::douyu::play_urls(&ctx.room_id).await.ok()?,
+        "bilibili" => {
+            let n: i64 = ctx.room_id.parse().ok()?;
+            crate::platforms::bilibili::play_urls(n).await.ok()?
+        }
+        _ => return None,
+    };
+    // 优先同画质；画质名对不上（平台改名）就退回第一条，有得播总比断着强
+    let hit = plays
+        .iter()
+        .find(|p| p.quality == quality)
+        .or_else(|| plays.first())?;
+    Some(hit.url.clone())
+}
+
 pub fn wrap_ex(
     url: &str,
     headers: Vec<(String, String)>,
@@ -387,6 +448,37 @@ async fn handle(
     // PreviousTagSize0）。直接灌给播放器，它会以为来了第二个文件而卡住/暂停——
     // 上一版就是栽在这里，还把原本正常的斗鱼搞坏了。所以从第二条连接起剥掉这 13 字节。
     let is_flv = ct.contains("x-flv") || e.url.contains(".flv");
+
+    // 【续流路径】有续流上下文时（斗鱼），走 DTV 那套「在 tag 边界接续」的做法：
+    // 旧流到期前预取新地址、接续时丢文件头/初始化 tag、等第一个越过旧时间轴的
+    // 关键帧、丢掉 CDN 回吐的重复 GOP —— **不改时间戳**（斗鱼是绝对时间戳，
+    // 改了反而坏；上一版就是照虎牙那套改写把斗鱼改崩的）。
+    // 参考：github.com/chen-zeong/DTV 的 src-tauri/src/flv_relay.rs
+    if is_flv && status.is_success() && e.flv_reconnect && renew_ctx().is_some() {
+        let (tx, rx) = tokio::sync::mpsc::channel::<Result<bytes::Bytes, std::io::Error>>(64);
+        let headers = e.headers.clone();
+        let use_proxy = e.proxy;
+        let body = resp.bytes_stream();
+        tokio::spawn(async move {
+            crate::flv_renew::relay(body, headers, use_proxy, tx).await;
+        });
+        let mut r = Response::new(Body::from_stream(ChannelStream(rx)));
+        *r.status_mut() = status;
+        let ctv = if ct.is_empty() { "video/x-flv" } else { ct.as_str() };
+        r.headers_mut().insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_str(ctv).unwrap_or(HeaderValue::from_static("video/x-flv")),
+        );
+        r.headers_mut().insert(
+            header::ACCESS_CONTROL_ALLOW_ORIGIN,
+            HeaderValue::from_static("*"),
+        );
+        return r;
+    }
+
+    // 【旧的 FLV 重连路径】虎牙这种短连接平台用：重连后会**改写时间戳**，
+    // 把多次连接拼成一条连续时间轴。
+    // 注意：**不要给斗鱼用这条** —— 斗鱼是绝对时间戳，改写会直接搞坏。
     if is_flv && status.is_success() && e.flv_reconnect {
         let (tx, rx) = tokio::sync::mpsc::channel::<Result<bytes::Bytes, std::io::Error>>(64);
         let url = e.url.clone();
@@ -395,13 +487,26 @@ async fn handle(
         tokio::spawn(async move {
             let mut flv = FlvState::new();
             let mut first = true;
+            let mut cur_url = url.clone();
             loop {
+                // 首段之外，每次重连都重新解析一次地址 —— 旧地址可能已经过期
+                // （斗鱼 300 秒），拿旧地址重连只会立刻再次 EOF，然后永远卡住。
+                // 画质取续流上下文里的当前值，这样用户在界面上换画质也能跟上。
+                if !first {
+                    let q = renew_ctx().map(|c| c.quality).unwrap_or_default();
+                    if let Some(fresh) = resolve_fresh_url(&q).await {
+                        if fresh != cur_url {
+                            eprintln!("[proxy] 流地址已续签，用新地址重连");
+                            cur_url = fresh;
+                        }
+                    }
+                }
                 let client = if use_proxy {
                     crate::net::relay_proxy()
                 } else {
                     crate::net::relay()
                 };
-                let mut rb = client.get(&url);
+                let mut rb = client.get(&cur_url);
                 for (k, v) in &headers {
                     rb = rb.header(k.as_str(), v.as_str());
                 }

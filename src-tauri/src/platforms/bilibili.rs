@@ -215,7 +215,7 @@ pub async fn room_detail(room_id: &str) -> Result<RoomDetail, String> {
     })
 }
 
-async fn play_urls(rid: i64) -> Result<Vec<PlayUrl>, String> {
+pub async fn play_urls(rid: i64) -> Result<Vec<PlayUrl>, String> {
     let c = net::direct();
     let url = format!(
         "https://api.live.bilibili.com/xlive/web-room/v2/index/getRoomPlayInfo?room_id={rid}&protocol=0,1&format=0,1,2&codec=0,1&qn=10000&platform=web&ptype=8&dolby=5&panorama=1"

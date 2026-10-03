@@ -90,6 +90,14 @@ export const startDanmaku = (platform: string, roomId: string) =>
 
 export const stopDanmaku = () => invoke<void>("stop_danmaku");
 
+/**
+ * 登记「续流上下文」：播放地址到期后，由本地代理自己重新解析一次，
+ * 播放器无需重载（斗鱼直链固定 300 秒就被 CDN 主动断开，不续的话看 5 分钟必断）。
+ * roomId 传空字符串表示清除。
+ */
+export const setStreamRenew = (platform: string, roomId: string, quality: string) =>
+  invoke<void>("set_stream_renew", { platform, roomId, quality });
+
 /** 从各种输入里猜平台和房间号 */
 export function parseInput(
   input: string,

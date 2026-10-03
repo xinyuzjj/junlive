@@ -6,6 +6,7 @@
 //! 3. 代理设置
 
 mod danmaku;
+mod flv_renew;
 mod model;
 mod net;
 mod platforms;
@@ -44,6 +45,29 @@ async fn search_rooms(
 #[tauri::command]
 async fn get_room(platform: String, room_id: String) -> Result<RoomDetail, String> {
     platforms::room_detail(&platform, &room_id).await
+}
+
+/// 登记「续流上下文」：流地址到期后由本地代理自己重新解析，播放器无感。
+///
+/// 为什么必须做：所有平台的流地址都带时效，**斗鱼固定 300 秒就被 CDN 主动 EOF**
+/// （服务端策略，跟网络无关），所以不管的话看 5 分钟必断。
+/// room_id 传空字符串表示清除（切房间 / 离开播放页时调）。
+#[tauri::command]
+async fn set_stream_renew(
+    platform: String,
+    room_id: String,
+    quality: String,
+) -> Result<(), String> {
+    proxy::set_renew(if room_id.is_empty() {
+        None
+    } else {
+        Some(proxy::RenewCtx {
+            platform,
+            room_id,
+            quality,
+        })
+    });
+    Ok(())
 }
 
 #[tauri::command]
@@ -165,6 +189,7 @@ pub fn run() {
             get_rooms,
             search_rooms,
             get_room,
+            set_stream_renew,
             get_proxy_setting,
             set_proxy_setting,
             get_proxy_port,

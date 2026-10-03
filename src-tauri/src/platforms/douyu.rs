@@ -273,7 +273,7 @@ pub async fn room_detail(room_id: &str) -> Result<RoomDetail, String> {
 }
 
 /// 斗鱼 web 播放地址的签名流程（参考 streamlink 的 douyu 插件实现）
-async fn play_urls(room_id: &str) -> Result<Vec<PlayUrl>, String> {
+pub async fn play_urls(room_id: &str) -> Result<Vec<PlayUrl>, String> {
     let c = net::direct();
     let did = DID;
 
@@ -413,8 +413,12 @@ fn build_play(d: &Value, name: &str, rid: &str) -> Option<PlayUrl> {
         format!("{rtmp_url}/{rtmp_live}")
     };
     let format = if full.contains(".flv") { "flv" } else { "hls" };
+    // 斗鱼用 wrap_flv（带断流重连），不用 wrap：
+    // 斗鱼的 FLV 直链**固定 300 秒**就被 CDN 主动 EOF（服务端策略，不是网络问题），
+    // 断了之后必须重连才有人接着播。重连时代理会用续流上下文重新解析新地址
+    // （见 proxy.rs 的 resolve_fresh_url），播放器侧表现为卡一下然后继续。
     Some(PlayUrl {
-        proxy: proxy::wrap(&full, hdr(rid), false),
+        proxy: proxy::wrap_flv(&full, hdr(rid), false),
         url: full,
         format: format.into(),
         quality: name.to_string(),
