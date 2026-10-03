@@ -1,6 +1,6 @@
 [package]
 name = "junlive"
-version = "1.1.1"
+version = "1.1.2"
 license = "MIT"
 description = "JunLive —— 多平台直播聚合桌面客户端（斗鱼/虎牙/B站/抖音/YouTube/SOOP/Twitch）"
 authors = ["xinyuzjj"]
@@ -98,3 +98,9 @@ lto = true
 opt-level = 3
 panic = "abort"
 strip = true
+
+# dev 构建（含安卓 debug APK）默认带完整调试符号 —— 一个 arm64 包能到 198 MB，
+# 手机上装起来又慢又占地方。剥掉调试信息（保留函数名，崩了还看得出在哪），
+# 体积能砍掉一大截。release 包本来就 strip，这一段只管 debug。
+[profile.dev]
+strip = "debuginfo"
