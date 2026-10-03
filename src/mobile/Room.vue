@@ -16,6 +16,7 @@ import {
   setStreamRenew,
   startDanmaku,
   stopDanmaku,
+  thumbUrl,
   type DanmakuMsg,
   type PlayUrl,
   type RoomDetail,
@@ -35,6 +36,8 @@ const error = ref("");
 const showQ = ref(false);
 const showInfo = ref(false);
 const listRef = ref<HTMLElement | null>(null);
+/** 播放器舞台：手势只挂在它上面，下方弹幕列表在另一层，滚动不受影响 */
+const stageRef = ref<HTMLElement | null>(null);
 
 /**
  * 移动端全屏。
@@ -86,6 +89,163 @@ async function toggleFull() {
   syncOrient();
 }
 
+/* ------------------------------------------------------------------ 手势控制
+ * 手机上最顺手的操作方式：
+ *   左半屏上下滑 → 亮度（仅移动端，原理见 applyBright）
+ *   右半屏上下滑 → 音量
+ *   横滑         → 进度（直播没有时间轴，给提示）
+ * 滑动时画面中央弹一个小浮层显示当前数值，松手 1 秒后消失。
+ * 监听只挂在 .mr-stage（画面区域）上，下面的弹幕列表是另一层，滚动不受影响。
+ */
+const gTip = ref<{ icon: string; text: string } | null>(null);
+/** 模拟亮度值（不是系统亮度，见 applyBright） */
+const bright = ref(1);
+const BRIGHT_MIN = 0.4;
+const BRIGHT_MAX = 1.3;
+/** 小于这个总位移当点按处理 —— 手指轻微抖动不该触发手势 */
+const GESTURE_MIN = 12;
+
+let gStartX = 0;
+let gStartY = 0;
+/** 手势开始时的基准值：音量 / 亮度 / 播放进度 */
+let gStartVal = 0;
+let gSeekTo = 0;
+let gTipTimer: number | null = null;
+type GKind = "none" | "volume" | "bright" | "progress" | "live" | "ignore";
+let gKind: GKind = "none";
+
+function stageVideo(): HTMLVideoElement | null {
+  return stageRef.value?.querySelector("video") ?? null;
+}
+
+/** 移动端判定：桌面窗口下没有「亮度」这个概念，亮度手势直接跳过 */
+function isMobile(): boolean {
+  return window.innerWidth <= 820;
+}
+
+function showTip(icon: string, text: string) {
+  gTip.value = { icon, text };
+  if (gTipTimer) {
+    window.clearTimeout(gTipTimer);
+    gTipTimer = null;
+  }
+}
+
+/** 松手后延迟收起浮层（松手 1 秒后自动消失） */
+function hideTipSoon() {
+  if (gTipTimer) window.clearTimeout(gTipTimer);
+  gTipTimer = window.setTimeout(() => {
+    gTip.value = null;
+    gTipTimer = null;
+  }, 1000);
+}
+
+function fmtSec(t: number): string {
+  if (!isFinite(t) || t < 0) t = 0;
+  const m = Math.floor(t / 60);
+  const s = Math.floor(t % 60);
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+/**
+ * 模拟亮度。
+ *
+ * ⚠️ 这不是系统亮度：Tauri 桌面端 / 浏览器都没有「调屏幕背光」的 API，
+ * 真机上想调系统亮度必须额外引 Tauri 插件，而本项目不引入任何新依赖。
+ * 所以这里用 CSS filter: brightness() 作用在 <video> 上做近似 ——
+ * 只是把画面本身调亮/调暗，改不了屏幕背光，也管不到系统其它界面。
+ * 这是刻意的近似，不是 bug。桌面窗口下不做亮度手势（桌面没这个概念）。
+ */
+function applyBright(v: number) {
+  bright.value = Math.min(BRIGHT_MAX, Math.max(BRIGHT_MIN, v));
+  const el = stageVideo();
+  if (el) el.style.filter = `brightness(${bright.value})`;
+}
+
+function onStageTouchStart(e: TouchEvent) {
+  const t = e.touches[0];
+  if (!t) return;
+  gStartX = t.clientX;
+  gStartY = t.clientY;
+  gKind = "none";
+}
+
+function onStageTouchMove(e: TouchEvent) {
+  const t = e.touches[0];
+  if (!t) return;
+  const dx = t.clientX - gStartX;
+  const dy = t.clientY - gStartY;
+
+  // 首次超过阈值时才判定手势类型，此后这一轮触摸锁定该类型
+  if (gKind === "none") {
+    if (Math.abs(dx) < GESTURE_MIN && Math.abs(dy) < GESTURE_MIN) return;
+    const v = stageVideo();
+    if (!v) return;
+    if (Math.abs(dx) > Math.abs(dy)) {
+      // 横向 → 进度。直播没有可拖的时间轴，给提示就够，别假装能拖
+      const live = !isFinite(v.duration) || v.duration <= 0;
+      if (live) {
+        gKind = "live";
+        showTip("🚫", "直播不支持拖动");
+        return;
+      }
+      gKind = "progress";
+      gStartVal = v.currentTime;
+      gSeekTo = v.currentTime;
+    } else if (gStartX < window.innerWidth / 2) {
+      // 起点在左半边 → 亮度；桌面跳过并且不显示浮层
+      if (!isMobile()) {
+        gKind = "ignore";
+        return;
+      }
+      gKind = "bright";
+      gStartVal = bright.value;
+    } else {
+      // 起点在右半边 → 音量
+      gKind = "volume";
+      gStartVal = Math.min(1, Math.max(0, v.volume));
+    }
+  }
+
+  if (gKind === "volume" || gKind === "bright") {
+    const h = stageRef.value?.clientHeight || window.innerHeight;
+    // 往上滑是增大，所以取 -dy；滑半个屏高对应调满/调到底
+    const ratio = -dy / Math.max(1, h * 0.5);
+    if (gKind === "volume") {
+      const nv = Math.min(1, Math.max(0, gStartVal + ratio));
+      const vv = stageVideo();
+      if (vv) {
+        vv.volume = nv;
+        vv.muted = nv === 0;
+      }
+      showTip(nv === 0 ? "🔇" : "🔊", `音量 ${Math.round(nv * 100)}%`);
+    } else {
+      applyBright(gStartVal + ratio * (BRIGHT_MAX - BRIGHT_MIN));
+      const pct = Math.round(((bright.value - BRIGHT_MIN) / (BRIGHT_MAX - BRIGHT_MIN)) * 100);
+      showTip("☀", `亮度 ${pct}%`);
+    }
+  } else if (gKind === "progress") {
+    const v = stageVideo();
+    if (!v) return;
+    const w = stageRef.value?.clientWidth || window.innerWidth;
+    const dur = v.duration || 0;
+    // 横滑满整宽 ≈ 拖动 min(时长, 300s)，避免长片一划就飞到结尾
+    const span = Math.min(dur, 300);
+    gSeekTo = Math.min(dur, Math.max(0, gStartVal + (dx / Math.max(1, w)) * span));
+    showTip("⏩", `${fmtSec(gSeekTo)} / ${fmtSec(dur)}`);
+  }
+}
+
+function onStageTouchEnd() {
+  // 进度手势松手才真正跳转 —— 滑动途中只更新预览，避免反复 seek 卡顿
+  if (gKind === "progress") {
+    const v = stageVideo();
+    if (v && isFinite(gSeekTo)) v.currentTime = gSeekTo;
+  }
+  gKind = "none";
+  hideTipSoon();
+}
+
 let unlisten: (() => void) | null = null;
 
 /** 观看人数是字符串（各平台单位不一），统一转成「万」显示 */
@@ -98,6 +258,15 @@ function fmt(raw: string | undefined): string {
 function scrollBottom() {
   const el = listRef.value;
   if (el) el.scrollTop = el.scrollHeight;
+}
+
+/**
+ * 封面海报加载失败兜底：把破图藏起来，露出舞台黑底，
+ * 避免加载中/未开播时出现破图图标。
+ */
+function coverErr(e: Event) {
+  const el = e.target as HTMLImageElement;
+  el.style.visibility = "hidden";
 }
 
 function pick(p: PlayUrl) {
@@ -160,6 +329,7 @@ onBeforeUnmount(() => {
   window.removeEventListener("resize", syncOrient);
   window.removeEventListener("orientationchange", syncOrient);
   if (ctrlTimer) window.clearTimeout(ctrlTimer);
+  if (gTipTimer) window.clearTimeout(gTipTimer);
   unlisten?.();
   stopDanmaku().catch(() => {});
   setStreamRenew("", "", "").catch(() => {});
@@ -167,9 +337,27 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="mr" :class="{ full }" @click="full && pokeCtrl()">
-    <!-- 播放器：固定 16:9 贴顶 -->
-    <div class="mr-stage">
+  <div class="mr" :class="{ full, landscape }" @click="full && pokeCtrl()">
+    <!-- 播放器：固定 16:9 贴顶。
+         手势（亮度/音量/进度）挂在这一层，只作用于画面区域 -->
+    <div
+      ref="stageRef"
+      class="mr-stage"
+      @touchstart="onStageTouchStart"
+      @touchmove="onStageTouchMove"
+      @touchend="onStageTouchEnd"
+      @touchcancel="onStageTouchEnd"
+    >
+      <!-- 封面海报：拉流还没出画面时（加载中 / 未开播 / 出错）先用缩略图垫底，
+           走 thumbUrl 只拉 400px 的小图省流量；播放器一有画面就会盖住它 -->
+      <img
+        v-if="detail?.cover"
+        class="mr-cover"
+        :src="thumbUrl(props.platform, detail.cover, 400)"
+        referrerpolicy="no-referrer"
+        alt=""
+        @error="coverErr"
+      />
       <Player
         v-if="current"
         :play="current"
@@ -218,6 +406,13 @@ onBeforeUnmount(() => {
     <button v-if="full" class="mr-exit" :class="{ gone: !ctrlOn }" @click.stop="toggleFull">
       ✕ 退出全屏
     </button>
+
+    <!-- 手势浮层：fixed 定位、不参与布局、不挡触摸（pointer-events:none）。
+         z-index 8050 —— 高于全屏舞台(8000)，低于退出按钮(8100)，退出键始终可点 -->
+    <div v-if="gTip" class="mr-gesture">
+      <span class="mr-gesture-i">{{ gTip.icon }}</span>
+      <span class="mr-gesture-t">{{ gTip.text }}</span>
+    </div>
 
     <!-- 竖屏提示：全屏锁横屏失败时（iOS / 系统锁了旋转），提示用户手动转过来 -->
     <div v-if="full && !landscape" class="mr-rotate">
@@ -273,6 +468,15 @@ onBeforeUnmount(() => {
   aspect-ratio: 16 / 9;
   flex: none;
   background: #000;
+}
+/* 封面海报：铺满舞台，垫在播放器 / 加载遮罩下面 */
+.mr-cover {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 .mr-veil {
   position: absolute;
@@ -388,6 +592,17 @@ onBeforeUnmount(() => {
   display: none; /* 全屏时只看画面，滚动弹幕列表先收起来 */
 }
 
+/* 横屏全屏：把播放器容器强制铺满 viewport（100vw × 100vh）。
+   Player 自带的飞屏弹幕层是相对播放器 inset:0 的，只有容器铺满它才跟着铺满整屏。
+   为什么只在横屏铺满：手机横屏时 16:9 画面刚好吃掉整屏，弹幕能横跨整个画面；
+   纵屏若也铺满，16:9 会被拉扁、或因 object-fit: contain 留出很宽的黑边，
+   弹幕飘在黑边上很突兀。所以纵屏保持现状（画面 16:9 居中、上下留黑）。 */
+.mr.full.landscape .mr-stage :deep(.player) {
+  width: 100vw;
+  height: 100vh;
+  border-radius: 0;
+}
+
 .mr-exit {
   position: fixed;
   left: 12px;
@@ -406,6 +621,34 @@ onBeforeUnmount(() => {
 .mr-exit.gone {
   opacity: 0;
   pointer-events: none;
+}
+
+/* 手势浮层：画面中央的小提示。fixed 定位不参与布局，pointer-events:none 不拦触摸，
+   z-index 8050 夹在全屏舞台(8000)与退出按钮(8100)之间，退出键不会被它盖住。 */
+.mr-gesture {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 8050;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 14px 22px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.62);
+  color: var(--fg);
+  font-size: 13px;
+  pointer-events: none;
+  user-select: none;
+}
+.mr-gesture-i {
+  font-size: 26px;
+  line-height: 1;
+}
+.mr-gesture-t {
+  font-variant-numeric: tabular-nums;
 }
 
 /* 竖屏提示（全屏锁横屏失败时出现） */

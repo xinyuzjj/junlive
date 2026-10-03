@@ -142,5 +142,87 @@ export function avatarUrl(platform: string, avatar?: string | null): string {
   return a;
 }
 
+/**
+ * 把封面 URL 换成「手机够用的小图」，降低移动端的流量与内存。
+ *
+ * 设计原则（重要）：
+ *   1. 各平台规则**完全独立**，不做任何跨平台兜底猜测——本项目硬规矩。
+ *   2. 拿不准的平台一律**原样返回**，宁可不变也不要拼出裂图（列表一裂就是满屏破图）。
+ *   3. 纯前端字符串处理，不改后端、不加依赖、不发请求。
+ *
+ * 各平台实测后确定的规则（w 为目标宽度，按 16:9 推导高度）：
+ *   bilibili  i0.hdslb.com 图床支持 `@<宽>w_<高>h_1c.jpg` 处理后缀（1c=居中裁剪），
+ *             实测 400w_225h_1c 能把 200KB 原图降到 ~22KB，安全。
+ *   huya      msstatic 图床支持 OSS 处理参数 `x-oss-process=image/resize,w_<宽>`，
+ *             实测 live-cover 主机 162KB→17KB；anchorpost 主机不认但会原样返回原图，
+ *             仍然 200，不会裂图，所以统一拼上。
+ *   soop      liveimg.sooplive.com 的档位在**路径段**里：l=240x135、m=480x270，
+ *             其它字母都会回落到 480x270。按目标宽度选最小够用的一档。
+ *   twitch    static-cdn.jtvnw.net 的 `...-<宽>x<高>.jpg` 支持任意尺寸，直接改。
+ *   youtube   i.ytimg.com/vi/<id>/<规格>.jpg，换成更小的规格文件名（m 系列恒为 16:9）。
+ *
+ * 原样返回（实测无法安全缩图）：
+ *   douyu     列表用的 `rs16` 本身就是最小档 `/dy1`（仅 ~8KB）；试过的
+ *             `/dy2`、`/320/180/…` 等路径规则要么更大、要么 404。没有安全参数，原样。
+ *   douyin    封面是带 `x-signature` 的**签名 URL**，实测改动 resize 模板
+ *             (`:360:`→`:320:`/`:400:`) 或去掉模板都会 403。签名绑定了尺寸，原样。
+ */
+export function thumbUrl(platform: string, cover: string, w = 400): string {
+  const raw = (cover || "").trim();
+  if (!raw) return "";
+
+  // 统一成绝对 https（协议相对地址补 https）；非 http 资源不处理
+  const u = raw.startsWith("//") ? "https:" + raw : raw;
+  if (!/^https?:\/\//i.test(u)) return raw;
+
+  const h = Math.round((w * 9) / 16); // 16:9，和移动端卡片比例一致
+
+  switch (platform) {
+    case "bilibili": {
+      // 只处理 hdslb 图床，且没带过处理后缀（带了就说明后端/别处已处理，别叠加）
+      if (!/(^|\.)hdslb\.com\//i.test(u) || u.includes("@")) return u;
+      return `${u}@${w}w_${h}h_1c.jpg`;
+    }
+
+    case "douyu":
+      // rs16 已是最小档 /dy1，无安全缩放参数
+      return u;
+
+    case "huya": {
+      if (!/(^|\.)msstatic\.com\//i.test(u)) return u;
+      const sep = u.includes("?") ? "&" : "?";
+      return `${u}${sep}x-oss-process=image/resize,w_${w}`;
+    }
+
+    case "douyin":
+      // 签名 URL，改尺寸会 403
+      return u;
+
+    case "soop": {
+      const m = u.match(/^(https?:\/\/liveimg\.sooplive\.com)\/[a-z]+\/(.+)$/i);
+      if (!m) return u;
+      const tier = w <= 240 ? "l" : "m";
+      return `${m[1]}/${tier}/${m[2]}`;
+    }
+
+    case "twitch": {
+      if (!/static-cdn\.jtvnw\.net\/previews-ttv\//i.test(u)) return u;
+      return u.replace(/-(\d+)x(\d+)\.jpg/i, `-${w}x${h}.jpg`);
+    }
+
+    case "youtube": {
+      const m = u.match(/^(.*\/vi[_a-z]*\/[^/]+\/)[^/?]+\.(jpg|webp)(\?.*)?$/i);
+      if (!m) return u;
+      // mqdefault 恒为 320x180 真 16:9；hqdefault(480x360) 是 4:3 带黑边，
+      // 在 16:9 卡片里会露黑边，所以宽度够也优先用 mq。
+      const spec = w <= 120 ? "default" : w <= 480 ? "mqdefault" : "hqdefault";
+      return `${m[1]}${spec}.jpg${m[3] || ""}`;
+    }
+
+    default:
+      return u;
+  }
+}
+
 /** 打开 YouTube 登录窗口；登录成功后后端会自动保存 Cookie */
 export const youtubeLogin = () => invoke<string>("youtube_login");

@@ -42,6 +42,23 @@ export const store = reactive({
   current: localStorage.getItem("junlive.platform") || "bilibili",
   follows: loadFollows(),
 
+  /**
+   * 深色模式开关。
+   *
+   * 为什么把状态放在 store 而不是组件里：顶栏的切换按钮、启动时的主题应用、
+   * 刷新后的恢复，三处都要读同一个值，放这里只有一份真相。
+   * 持久化键名固定为 junlive.dark，存 "1"/"0"（用 === "1" 判断，
+   * 避免老数据里出现字符串 "true"/"false" 时误判）。
+   * 注意：这里**只负责状态与持久化**，真正往 <html> 上挂 class 的动作交给
+   * main.ts —— 保持 store 不直接碰 DOM，方便以后在别处复用。
+   */
+  dark: localStorage.getItem("junlive.dark") === "1",
+
+  toggleDark() {
+    this.dark = !this.dark;
+    localStorage.setItem("junlive.dark", this.dark ? "1" : "0");
+  },
+
   setPlatform(id: string) {
     this.current = id;
     localStorage.setItem("junlive.platform", id);

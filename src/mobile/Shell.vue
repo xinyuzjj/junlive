@@ -8,7 +8,7 @@
  *
  *   顶栏  只有「当前平台名 + 搜索」一行，点平台名弹出平台选择浮层
  *   内容  全屏单列，没有跟随侧栏
- *   底部  三大项标签栏（首页 / 关注 / 设置），这是手机上唯一顺手的导航位置
+ *   底部  四大项标签栏（发现 / 首页 / 关注 / 设置），这是手机上唯一顺手的导航位置
  *
  * 播放页也是独立实现（mobile/Room.vue）：播放器在上、弹幕在下，不是 PC 的左右分栏。
  */
@@ -18,7 +18,8 @@ import { listPlatforms, parseInput } from "../api";
 import { store } from "../store";
 import MobileHome from "./Home.vue";
 import MobileRoom from "./Room.vue";
-import Follow from "../views/Follow.vue";
+import MobileDiscover from "./Discover.vue";
+import Follow from "./Follow.vue";
 import Settings from "../views/Settings.vue";
 
 const router = useRouter();
@@ -31,12 +32,13 @@ const showPlat = ref(false);
  *
  * 为什么不用 <router-view> 再挂一套 /m/* 路由：手机上这几个页面本来就少，
  * 直接按路径分发更简单，也避免维护两套路由表导致 PC 端误跳。
- * 首页和播放页是**移动端专属实现**；关注/设置是列表和表单页，
- * 本身就是单列布局，窄屏下沿用（这两个不涉及「并排挤死」的问题）。
+ * 首页、播放页、关注页都是**移动端专属实现**（各自 src/mobile/*.vue）；
+ * 只有设置页本身就是单列表单，窄屏下沿用 PC 版（不涉及「并排挤死」的问题）。
  */
 const view = computed(() => {
   const p = route.path;
   if (p.startsWith("/room/")) return "room";
+  if (p.startsWith("/discover")) return "discover";
   if (p.startsWith("/follow")) return "follow";
   if (p.startsWith("/settings") || p.startsWith("/about")) return "settings";
   return "home";
@@ -103,16 +105,34 @@ onMounted(async () => {
         <input v-model="kw" :placeholder="searchPlaceholder" @keyup.enter="doSearch" />
         <button @click="doSearch">🔍</button>
       </div>
+
+      <!--
+        深色模式开关。放在这里而不是设置页：不改 Settings.vue（那是 PC 共用页），
+        且主题切换是高频操作，顶栏一键最顺手。
+        图标语义：当前是浅色 → 显示 🌙（点了变深色）；当前深色 → 显示 ☀️。
+      -->
+      <button
+        class="m-dark"
+        :title="store.dark ? '切换浅色模式' : '切换深色模式'"
+        :aria-label="store.dark ? '切换浅色模式' : '切换深色模式'"
+        @click="store.toggleDark()"
+      >
+        {{ store.dark ? "☀️" : "🌙" }}
+      </button>
     </header>
 
     <main class="m-body">
       <MobileHome v-if="view === 'home'" />
       <MobileRoom v-else-if="view === 'room'" :platform="roomArgs.platform" :id="roomArgs.id" />
+      <MobileDiscover v-else-if="view === 'discover'" />
       <Follow v-else-if="view === 'follow'" />
       <Settings v-else />
     </main>
 
     <nav class="m-tabs">
+      <button :class="{ on: $route.path === '/discover' }" @click="go('/discover')">
+        <span class="ti">🧭</span><span>发现</span>
+      </button>
       <button :class="{ on: $route.path === '/' }" @click="go('/')">
         <span class="ti">🏠</span><span>首页</span>
       </button>
@@ -217,6 +237,25 @@ onMounted(async () => {
   border: 0;
   background: none;
   font-size: 15px;
+}
+
+/* 深色开关：热区 44×44，满足最小触控面积要求 */
+.m-dark {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 17px;
+  border: 1px solid var(--border-2);
+  border-radius: 10px;
+  background: var(--chip);
+  color: var(--fg);
+}
+.m-dark:active {
+  background: var(--chip-hover);
 }
 
 .m-body {
