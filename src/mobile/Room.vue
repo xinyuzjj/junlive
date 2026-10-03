@@ -45,16 +45,45 @@ const listRef = ref<HTMLElement | null>(null);
  * 并显示一个能点的退出按钮（手机上没有 ESC 键，必须有可见的退出入口）。
  */
 const full = ref(false);
-function toggleFull() {
+/** 是否横屏。全屏时竖屏状态要提示用户转过来 —— 手机看直播横着画面才足 */
+const landscape = ref(false);
+/** 全屏时控件是否可见（沉浸式：几秒后自动隐藏，点一下再出来） */
+const ctrlOn = ref(true);
+let ctrlTimer: number | null = null;
+
+function syncOrient() {
+  landscape.value = window.innerWidth > window.innerHeight;
+}
+
+function pokeCtrl() {
+  ctrlOn.value = true;
+  if (ctrlTimer) window.clearTimeout(ctrlTimer);
+  ctrlTimer = window.setTimeout(() => {
+    if (full.value) ctrlOn.value = false;
+  }, 3000);
+}
+
+async function toggleFull() {
   full.value = !full.value;
-  // 横屏：能锁就锁，锁不了也不影响（iOS Safari 不支持 screen.orientation.lock）
-  try {
-    const so = screen.orientation as unknown as { lock?: (o: string) => Promise<void> };
-    if (full.value) void so?.lock?.("landscape").catch(() => {});
-    else (screen.orientation as unknown as { unlock?: () => void }).unlock?.();
-  } catch {
-    /* 忽略 */
+  if (full.value) {
+    pokeCtrl();
+    // 锁横屏：这是手机看直播的主场景，横着画面才足。
+    // 失败也不影响（iOS Safari 不支持 lock；部分安卓要用户手势后才行）
+    try {
+      const so = screen.orientation as unknown as { lock?: (o: string) => Promise<void> };
+      await so?.lock?.("landscape");
+    } catch {
+      /* 锁不住就靠用户自己转，下面会给提示 */
+    }
+  } else {
+    if (ctrlTimer) window.clearTimeout(ctrlTimer);
+    try {
+      (screen.orientation as unknown as { unlock?: () => void }).unlock?.();
+    } catch {
+      /* 忽略 */
+    }
   }
+  syncOrient();
 }
 
 let unlisten: (() => void) | null = null;
@@ -97,6 +126,9 @@ function toggleFollow() {
 }
 
 onMounted(async () => {
+  syncOrient();
+  window.addEventListener("resize", syncOrient);
+  window.addEventListener("orientationchange", syncOrient);
   let rid = decodeURIComponent(props.id);
   try {
     const d = await getRoom(props.platform, rid);
@@ -125,6 +157,9 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  window.removeEventListener("resize", syncOrient);
+  window.removeEventListener("orientationchange", syncOrient);
+  if (ctrlTimer) window.clearTimeout(ctrlTimer);
   unlisten?.();
   stopDanmaku().catch(() => {});
   setStreamRenew("", "", "").catch(() => {});
@@ -132,7 +167,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="mr" :class="{ full }">
+  <div class="mr" :class="{ full }" @click="full && pokeCtrl()">
     <!-- 播放器：固定 16:9 贴顶 -->
     <div class="mr-stage">
       <Player
@@ -178,8 +213,17 @@ onBeforeUnmount(() => {
       </button>
     </div>
 
-    <!-- 全屏时的退出入口。手机上没有 ESC 键，必须给一个看得见、点得到的按钮 -->
-    <button v-if="full" class="mr-exit" @click="toggleFull">✕ 退出全屏</button>
+    <!-- 全屏时的退出入口。手机上没有 ESC 键，必须给一个看得见、点得到的按钮。
+         沉浸式：3 秒后自动淡出（不挡画面），点屏幕任意位置再出来。 -->
+    <button v-if="full" class="mr-exit" :class="{ gone: !ctrlOn }" @click.stop="toggleFull">
+      ✕ 退出全屏
+    </button>
+
+    <!-- 竖屏提示：全屏锁横屏失败时（iOS / 系统锁了旋转），提示用户手动转过来 -->
+    <div v-if="full && !landscape" class="mr-rotate">
+      <span class="mr-rotate-i">📱↻</span>
+      <span>横过来看，画面更足</span>
+    </div>
 
     <div v-if="showInfo" class="mr-info">
       <div class="mr-info-t">{{ detail?.title }}</div>
@@ -356,6 +400,35 @@ onBeforeUnmount(() => {
   background: rgba(0, 0, 0, 0.55);
   color: #fff;
   font-size: 13px;
+  transition: opacity 0.25s;
+}
+/* 沉浸式：3 秒后淡出，不挡画面 */
+.mr-exit.gone {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* 竖屏提示（全屏锁横屏失败时出现） */
+.mr-rotate {
+  position: fixed;
+  inset: 0;
+  z-index: 8150;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: rgba(0, 0, 0, 0.78);
+  color: #fff;
+  font-size: 14px;
+}
+.mr-rotate-i {
+  font-size: 40px;
+  animation: mr-rot 1.8s ease-in-out infinite;
+}
+@keyframes mr-rot {
+  0%, 40% { transform: rotate(0deg); }
+  60%, 100% { transform: rotate(90deg); }
 }
 
 .mr-info {
