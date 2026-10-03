@@ -230,8 +230,11 @@ GNU 工具链下还有一个坑：`crate-type` 不能带 `cdylib`，否则链接
 | 联系方式 | |
 |---|---|
 | GitHub | [@xinyuzjj](https://github.com/xinyuzjj) |
-| 邮箱 | 1105002234@qq.com |
-| QQ | 1105002234 |
+| 推特 | [@hll404357315674](https://x.com/hll404357315674) |
+| 电报 | [@junjunnizxcz](https://t.me/junjunnizxcz) |
+| 微信 | junjunnizz |
+| QQ | 1742259821 |
+| 邮箱 | 1742259821@qq.com |
 
 有问题、想提需求，或者想聊直播协议逆向，欢迎开 issue 或直接联系。
 
@@ -245,6 +248,30 @@ GNU 工具链下还有一个坑：`crate-type` 不能带 `cdylib`，否则链接
 
 接口抓取思路参考了这些项目：
 
+### [lemon-live](https://github.com/lemonfog/lemon-live) · 聚合形态的起点
+
+聚合直播网站，支持虎牙 / 斗鱼 / 抖音 / 哔哩哔哩，带弹幕。
+zrfme-live 的作者原话是「我长期使用 lemon-live 看直播，它用不了之后才有了这个项目」——
+本项目是同一类形态的桌面端实现：七个平台放进一个窗口，列表 / 搜索 / 播放 / 弹幕四件事都自己接。
+
+### [pure_live](https://github.com/liuchuancong/pure_live) · 平台内核与能力模型
+
+平台内核、能力模型和播放器行为的主要参考。
+本项目 `src-tauri/src/model.rs` 里那套统一数据模型（`Room` / `RoomDetail` / `PlayUrl`）
+和「同一画质下多 CDN 线路可选」的播放器行为，就是照这套能力模型设计的。
+
+### [Simple Live](https://github.com/xiaoyaocz/dart_simple_live) · 站点接口抓取思路
+
+站点接口抓取思路参考。各平台的分区树、房间列表、搜索、房间详情、播放地址
+这几条链路都顺着它摸过一遍；斗鱼 / 虎牙 / B站 / 抖音的接口这几年改了很多次，
+也是靠它的实现对照定位的。
+
+### [douyinLive](https://github.com/jwwsjlm/douyinLive) · 抖音 Webcast 弹幕接入
+
+抖音 Webcast 弹幕接入参考（配套的 [douyinlive-proto](https://github.com/jwwsjlm/douyinlive-proto)
+提供 proto 定义）。本项目的抖音弹幕通道 —— wss 长连接 + `PushFrame` / `Response` / `Message`
+三层 protobuf 解包 + X-Bogus 签名 + 握手必须带 `ttwid` Cookie —— 就是照这个实现的。
+
 ### [Multistream](https://github.com/ilanzgx/multistream) · 桌面形态参考
 
 单窗口聚合多个平台的形态，以及「流从官方播放器加载」的思路
@@ -257,20 +284,7 @@ GNU 工具链下还有一个坑：`crate-type` 不能带 `cdylib`，否则链接
 而不是每次临时拉）、窗口全屏（CSS fullscreen 而不是 Fullscreen API）、
 以及抖音房间列表的 `a_bogus` 签名实现。
 
-### [zrfme-live](https://github.com/shaoyouvip/zrfme-live) · 接口抓取思路索引
-
-这是一个接口抓取思路的索引项目，它的致谢列表指向了四个更上游的实现：
-**lemon-live**、**pure_live**、**Simple Live**、**douyinLive**。
-
-本项目从这条线索里拿到了几个关键实现：
-
-- **斗鱼** `getEncryption` + `auth` 签名 —— 移植自 streamlink 的斗鱼插件
-- **B站** WBI 签名（`MIXIN_KEY_ENC_TAB` → `w_rid`）
-- **虎牙** `anti_code` 签名（`seqid` / `wsSecret` / `rotl32_by8`）
-- **抖音** X-Bogus 签名（用 QuickJS 跑混淆 JS）与 `a_bogus`（纯 Rust 实现）
-
-各平台的弹幕协议也都是顺着这些项目摸出来的：斗鱼自有 TCP 协议、虎牙自有 WS 协议
-（uid 必须取房间页的 `lp`）、B站 `getDanmuInfo`、抖音 WS + `ttwid` 握手。
+> 上游线索来自 [zrfme-live](https://github.com/shaoyouvip/zrfme-live) 的致谢列表。
 
 ---
 

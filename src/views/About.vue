@@ -20,10 +20,14 @@ const AUTHOR = {
   name: "峻峻尼",
   alias: "junjunni",
   role: "JunLive 作者 · 全栈 / 直播协议逆向",
-  gh: "https://github.com/xinyuzjj",
-  ghName: "@xinyuzjj",
-  mail: "1105002234@qq.com",
-  qq: "1105002234",
+  contacts: [
+    { k: "GitHub", v: "@xinyuzjj", href: "https://github.com/xinyuzjj" },
+    { k: "推特", v: "@hll404357315674", href: "https://x.com/hll404357315674" },
+    { k: "电报", v: "@junjunnizxcz", href: "https://t.me/junjunnizxcz" },
+    { k: "微信", v: "junjunnizz", href: "" },
+    { k: "QQ", v: "1742259821", href: "" },
+    { k: "邮箱", v: "1742259821@qq.com", href: "mailto:1742259821@qq.com" },
+  ] as { k: string; v: string; href: string }[],
 };
 
 function open(u: string) {
@@ -62,6 +66,34 @@ const STACK = [
 /** 致谢 */
 const CREDITS = [
   {
+    name: "lemon-live",
+    url: "https://github.com/lemonfog/lemon-live",
+    desc: "聚合形态的起点",
+    detail:
+      "聚合直播网站，支持虎牙 / 斗鱼 / 抖音 / 哔哩哔哩，带弹幕。zrfme-live 的作者原话是「我长期使用 lemon-live 看直播，它用不了之后才有了这个项目」—— 本项目是同一类形态的桌面端实现：七个平台放进一个窗口，列表 / 搜索 / 播放 / 弹幕四件事都自己接。",
+  },
+  {
+    name: "pure_live",
+    url: "https://github.com/liuchuancong/pure_live",
+    desc: "平台内核与能力模型",
+    detail:
+      "平台内核、能力模型和播放器行为的主要参考。本项目 src-tauri/src/model.rs 里那套统一数据模型（Room / RoomDetail / PlayUrl）和「同一画质下多 CDN 线路可选」的播放器行为，就是照这套能力模型设计的。",
+  },
+  {
+    name: "Simple Live",
+    url: "https://github.com/xiaoyaocz/dart_simple_live",
+    desc: "站点接口抓取思路",
+    detail:
+      "站点接口抓取思路参考。各平台的分区树、房间列表、搜索、房间详情、播放地址这几条链路都顺着它摸过一遍；斗鱼 / 虎牙 / B站 / 抖音的接口这几年改了很多次，也是靠它的实现对照定位的。",
+  },
+  {
+    name: "douyinLive",
+    url: "https://github.com/jwwsjlm/douyinLive",
+    desc: "抖音 Webcast 弹幕接入",
+    detail:
+      "抖音 Webcast 弹幕接入参考（配套的 douyinlive-proto 提供 proto 定义）。本项目的抖音弹幕通道 —— wss 长连接 + PushFrame / Response / Message 三层 protobuf 解包 + X-Bogus 签名 + 握手必须带 ttwid Cookie —— 就是照这个实现的。",
+  },
+  {
     name: "Multistream",
     url: "https://github.com/ilanzgx/multistream",
     desc: "桌面形态参考",
@@ -75,18 +107,36 @@ const CREDITS = [
     detail:
       "关注列表的在线状态持久化做法（把 liveStatus 存进关注记录、进页面立刻排好序，而不是每次临时拉）、窗口全屏（CSS fullscreen 而不是 Fullscreen API）、以及抖音房间列表的 a_bogus 签名实现。",
   },
-  {
-    name: "zrfme-live",
-    url: "https://github.com/shaoyouvip/zrfme-live",
-    desc: "接口抓取思路索引（展开）",
-    detail:
-      "这是一个接口抓取思路的索引项目，它的致谢列表指向了四个更上游的实现：lemon-live、pure_live、Simple Live、douyinLive。本项目从这条线索里拿到了几个关键实现——斗鱼的 getEncryption + auth 签名（移植自 streamlink 的斗鱼插件）、B站的 WBI 签名、虎牙的 anti_code 签名、抖音的 X-Bogus 签名（用 QuickJS 跑混淆 JS）。各平台的弹幕协议（斗鱼自有 TCP、虎牙自有 WS、B站 getDanmuInfo、抖音 WS + ttwid）也都是顺着这些项目摸出来的。",
-  },
 ];
 </script>
 
 <template>
   <div class="about">
+    <!-- 作者（放在最上面） -->
+    <section class="card">
+      <div class="card-title">作者</div>
+      <div class="who">
+        <div class="ava">峻</div>
+        <div>
+          <div class="nm">
+            {{ AUTHOR.name }}
+            <span class="alias">{{ AUTHOR.alias }}</span>
+          </div>
+          <div class="role">{{ AUTHOR.role }}</div>
+        </div>
+      </div>
+      <div class="contact">
+        <div v-for="c in AUTHOR.contacts" :key="c.k" class="crow">
+          <span class="ck">{{ c.k }}</span>
+          <a v-if="c.href" @click="open(c.href)">{{ c.v }}</a>
+          <span v-else class="cv">{{ c.v }}</span>
+        </div>
+      </div>
+      <p class="hint" style="margin: 12px 0 0">
+        有问题、想提需求，或者想聊直播协议逆向，欢迎开 issue 或直接联系。
+      </p>
+    </section>
+
     <!-- 头部 -->
     <section class="hero">
       <div class="brand">
@@ -161,42 +211,6 @@ const CREDITS = [
           </tr>
         </tbody>
       </table>
-    </section>
-
-    <!-- 作者 -->
-    <section class="card">
-      <div class="card-title">作者</div>
-      <div class="who">
-        <div class="ava">峻</div>
-        <div>
-          <div class="nm">
-            {{ AUTHOR.name }}
-            <span class="alias">{{ AUTHOR.alias }}</span>
-          </div>
-          <div class="role">{{ AUTHOR.role }}</div>
-        </div>
-      </div>
-      <div class="contact">
-        <div class="crow">
-          <span class="ck">GitHub</span>
-          <a @click="open(AUTHOR.gh)">{{ AUTHOR.ghName }}</a>
-        </div>
-        <div class="crow">
-          <span class="ck">邮箱</span>
-          <a @click="open('mailto:' + AUTHOR.mail)">{{ AUTHOR.mail }}</a>
-        </div>
-        <div class="crow">
-          <span class="ck">QQ</span>
-          <span class="cv">{{ AUTHOR.qq }}</span>
-        </div>
-        <div class="crow">
-          <span class="ck">项目</span>
-          <a @click="open(REPO)">xinyuzjj/junlive</a>
-        </div>
-      </div>
-      <p class="hint" style="margin: 12px 0 0">
-        有问题、想提需求或者想聊直播协议逆向，直接 GitHub 开 issue 或发邮件都行。
-      </p>
     </section>
 
     <!-- 致谢 -->
@@ -383,7 +397,7 @@ h1 {
 }
 .contact {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
   gap: 6px 16px;
 }
 .crow {
