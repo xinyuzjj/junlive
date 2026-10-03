@@ -579,7 +579,7 @@ defineExpose({ reload });
   <div
     ref="wrapRef"
     class="player"
-    :class="{ hide: !showCtrl, 'css-full': cssFull }"
+    :class="{ hide: !showCtrl, 'css-full': cssFull, 'embed-mode': isEmbed }"
     @mousemove="poke"
     @click="poke"
   >
@@ -788,6 +788,15 @@ video {
   display: block;
   border: 0;
   background: #000;
+}
+
+/* 官方播放器模式：iframe 让出底部 34px 给工具条，弹幕层也收窄到画面区域，
+   这样弹幕不会飘到工具条上，工具条也不会压住官方的控件栏。 */
+.embed-mode .embed {
+  height: calc(100% - 34px);
+}
+.embed-mode .dm-layer {
+  bottom: 34px;
 }
 
 .veil {
@@ -1012,17 +1021,22 @@ video {
 
 /* 弹幕设置 */
 /* YouTube 画面右下角的小工具条（弹幕设置 + 全屏） */
+/* 官方 iframe 播放器的工具栏。
+   **不能做成浮动层**：官方播放器（尤其 SOOP）底部那条控件栏是常驻的，
+   浮动工具条压在它上面会挡住官方的画质/音量/全屏按钮。
+   做法：让 iframe 让出底部一条，工具条做成静态的一行，
+   视觉上像是播放器自带的下沿，永远不会和官方按钮抢位置。 */
 .embed-tools {
-  position: absolute;
-  bottom: 8px;
-  right: 8px;
+  position: relative;
+  height: 34px;
   z-index: 8;
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 2px;
-  background: rgba(0, 0, 0, 0.42);
-  border-radius: 6px;
-  padding: 2px 4px;
+  padding: 0 6px;
+  background: #14151a;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 /* 线路下拉 */
