@@ -799,6 +799,31 @@ video {
   bottom: 34px;
 }
 
+/* 全屏时的处理：不再预留底部那一条（会把画面压扁、还空出一条很难看的横条），
+   让 iframe 铺满；工具条改成浮在画面右下角、比官方控件栏再高一点（bottom:52px）
+   以免遮挡官方的画质/音量按钮，并跟随控制栏一起自动隐藏（.hide）。 */
+.player.css-full.embed-mode .embed {
+  height: 100%;
+}
+.player.css-full.embed-mode .dm-layer {
+  bottom: 0;
+}
+.player.css-full .embed-tools {
+  position: absolute;
+  bottom: 52px;
+  right: 10px;
+  height: auto;
+  border: 0;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.42);
+  padding: 2px 4px;
+  transition: opacity 0.2s;
+}
+.player.css-full.hide .embed-tools {
+  opacity: 0;
+  pointer-events: none;
+}
+
 .veil {
   position: absolute;
   inset: 0;
