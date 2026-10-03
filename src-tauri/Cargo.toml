@@ -1,6 +1,6 @@
 [package]
 name = "junlive"
-version = "1.1.4"
+version = "1.1.5"
 license = "MIT"
 description = "JunLive —— 多平台直播聚合桌面客户端（斗鱼/虎牙/B站/抖音/YouTube/SOOP/Twitch）"
 authors = ["xinyuzjj"]
@@ -21,11 +21,6 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
-
-# 安卓沉浸式全屏要经 JNI 调 WindowInsetsController。
-# 版本必须与 tao/wry 拉的完全一致（0.21.1），否则 jni 的类型无法在两边传递 ——
-# jni 的 JObject/JValue 不保证跨 crate 版本兼容。
-jni = "0.21.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
