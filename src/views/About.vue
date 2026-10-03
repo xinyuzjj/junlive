@@ -46,7 +46,7 @@ const PLATFORMS = [
   { name: "虎牙", color: "#f5a623", area: "✅", search: "✅", play: "✅ FLV", dm: "✅", proxy: "—" },
   { name: "抖音", color: "#fe2c55", area: "✅", search: "房间号", play: "✅ HLS/FLV", dm: "✅", proxy: "—" },
   { name: "YouTube", color: "#ff0000", area: "✅ 分类", search: "✅", play: "✅ 官方播放器", dm: "✅ 自建", proxy: "需要" },
-  { name: "SOOP", color: "#0f7fff", area: "✅ 分类", search: "✅", play: "✅ 官方播放器", dm: "—", proxy: "需要" },
+  { name: "SOOP", color: "#0f7fff", area: "✅ 分类", search: "✅", play: "✅ 自建流 / 官方播放器", dm: "✅ 自建 WebSocket", proxy: "需要" },
   { name: "Twitch", color: "#9146ff", area: "✅ 游戏分类", search: "✅", play: "✅ 官方播放器", dm: "✅ 代理隧道", proxy: "需要" },
 ];
 
@@ -201,8 +201,10 @@ const CREDITS = [
       </table>
       <p class="hint foot">
         抖音没有可用的匿名搜索接口（平台硬限制），搜索框直接输<b>直播间号</b>或粘直播间链接。<br />
-        YouTube / Twitch / SOOP 走各自的官方播放器：YouTube 分片强制 PO token，
-        自建播放器一律 403；Twitch 自建播放器清晰度会被 ABR 反复切换。
+        YouTube / Twitch 走各自的官方播放器：YouTube 分片强制 PO token，
+        自建播放器一律 403；Twitch 自建播放器清晰度会被 ABR 反复切换。<br />
+        SOOP 比较特殊 —— 官方没给「又干净、画质又能调」的选项，
+        所以播放方式做成三档可选（自建流 / 官方播放器 / 官方完整播放页）。
       </p>
     </section>
 
