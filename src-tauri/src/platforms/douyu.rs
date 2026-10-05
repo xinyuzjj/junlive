@@ -21,6 +21,10 @@ fn hdr(rid: &str) -> Vec<(String, String)> {
 /// 斗鱼 web 端固定设备 id（streamlink 的 douyu 插件用同一常量）
 const DID: &str = "10000000000000000000000000001501";
 
+
+
+
+
 #[allow(dead_code)]
 fn random_did() -> String {
     let mut rng = rand::thread_rng();
@@ -317,46 +321,70 @@ pub async fn play_urls(room_id: &str) -> Result<Vec<PlayUrl>, String> {
     }
     let auth = md5_hex(&format!("{f}{key}{suffix}"));
 
-    // 3) 播放地址：原画 + multirates 里的其它画质
+    // 3) 逐档请求，按**接口实际返回的档位**命名并去重。
+    //
+    // 关键坑：斗鱼会按房间降级。实测同一批房间里，有的请求 rate=0（原画）
+    // 真的给原画（rtmp_live 无码率后缀、data.rate=0），有的却回
+    // data.rate=4、rtmp_live 带 _4000 后缀 —— 也就是**只给蓝光4M**。
+    //
+    // 早期代码无条件把第一条标成「原画」，于是 UI 上写着原画、实际播的是
+    // 4M；而且原画/蓝光8M/蓝光4M 三条都指向同一个流（三个重复条目）。
+    // 现在一律以 data.rate 为准 —— 拿不到原画就不列原画，不骗用户。
     let ts_s = ts.to_string();
-    let play = fetch_play(&c, room_id, enc_data, &ts_s, &auth, "0").await?;
+    let first = fetch_play(&c, room_id, enc_data, &ts_s, &auth, "0").await?;
 
-    let err = play["error"].as_i64().unwrap_or(-1);
-    if err != 0 || play["data"].is_null() {
+    let err = first["error"].as_i64().unwrap_or(-1);
+    if err != 0 || first["data"].is_null() {
         return Err(format!(
             "斗鱼接口返回 {err} {}",
-            play["msg"].as_str().unwrap_or("")
+            first["msg"].as_str().unwrap_or("")
         ));
     }
 
-    let mut out: Vec<PlayUrl> = Vec::new();
-    if let Some(p) = build_play(&play["data"], "原画", room_id) {
-        out.push(p);
-    }
-
-    // multirates 里列出该房间可用的其它画质（rate=0 是原画，已拿过）
-    let rates: Vec<(i64, String)> = play["data"]["multirates"]
+    // rate → 名称（含 rate=0 的原画，名字形如「原画2K60」/「原画1080P60」）。
+    // 用斗鱼给的名字比自己写死「原画」更有信息量。
+    let name_of: Vec<(i64, String)> = first["data"]["multirates"]
         .as_array()
         .map(|a| {
             a.iter()
-                .filter_map(|r| {
-                    let rate = r["rate"].as_i64()?;
-                    let name = r["name"].as_str()?.to_string();
-                    Some((rate, name))
-                })
-                .filter(|(r, _)| *r != 0)
+                .filter_map(|r| Some((r["rate"].as_i64()?, r["name"].as_str()?.to_string())))
                 .collect()
         })
         .unwrap_or_default();
 
-    for (rate, name) in rates.into_iter().take(5) {
+    let label_of = |rate: i64| -> String {
+        name_of
+            .iter()
+            .find(|(r, _)| *r == rate)
+            .map(|(_, n)| n.clone())
+            .unwrap_or_else(|| format!("{rate}M"))
+    };
+
+    // 首请求（rate=0）已拿到；再按 multirates 顺序请求其余档位。
+    let mut responses: Vec<(i64, Value)> = vec![(0, first)];
+    for (rate, _) in name_of.iter().filter(|(r, _)| *r != 0).take(5) {
         let rs = rate.to_string();
         if let Ok(v) = fetch_play(&c, room_id, enc_data, &ts_s, &auth, &rs).await {
-            if v["error"].as_i64().unwrap_or(-1) == 0 {
-                if let Some(p) = build_play(&v["data"], &name, room_id) {
-                    out.push(p);
-                }
+            if v["error"].as_i64().unwrap_or(-1) == 0 && !v["data"].is_null() {
+                responses.push((*rate, v));
             }
+        }
+    }
+
+    // 按**实际**档位取名 + 去重：被降级时多个请求会落到同一档，
+    // 不去重就会出现三个内容相同的条目。
+    let mut out: Vec<PlayUrl> = Vec::new();
+    let mut got: Vec<i64> = Vec::new();
+    for (asked, v) in &responses {
+        let d = &v["data"];
+        // data.rate 是斗鱼**实际**给我们的档位，缺失时才退回请求值
+        let actual = d["rate"].as_i64().unwrap_or(*asked);
+        if got.contains(&actual) {
+            continue;
+        }
+        if let Some(p) = build_play(d, &label_of(actual), room_id) {
+            got.push(actual);
+            out.push(p);
         }
     }
 
@@ -375,29 +403,43 @@ async fn fetch_play(
     auth: &str,
     rate: &str,
 ) -> Result<Value, String> {
-    c.post(format!(
-        "https://www.douyu.com/lapi/live/getH5PlayV1/{room_id}"
-    ))
-    .header("Referer", referer(room_id))
-    .header("Origin", "https://www.douyu.com")
-    .header("Content-Type", "application/x-www-form-urlencoded")
-    .form(&[
-        ("enc_data", enc_data),
-        ("tt", ts_s),
-        ("did", DID),
-        ("auth", auth),
-        ("cdn", ""),
-        ("rate", rate),
-        ("hevc", "0"),
-        ("fa", "0"),
-        ("ive", "0"),
-    ])
-    .send()
-    .await
-    .map_err(|e| e.to_string())?
-    .json()
-    .await
-    .map_err(|e| e.to_string())
+    let v: Value = c
+        .post(format!(
+            "https://www.douyu.com/lapi/live/getH5PlayV1/{room_id}"
+        ))
+        .header("Referer", referer(room_id))
+        .header("Origin", "https://www.douyu.com")
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .form(&[
+            ("enc_data", enc_data),
+            ("tt", ts_s),
+            ("did", DID),
+            ("auth", auth),
+            ("cdn", ""),
+            ("rate", rate),
+            ("hevc", "0"),
+            ("fa", "0"),
+            ("ive", "0"),
+        ])
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .json::<Value>()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // 调试开关：JUNLIVE_DUMP_DOUYU=1 时打印每次请求的原始返回。
+    // 排查画质问题要看三个字段：
+    //   data.rtmp_live  —— 真实流地址后缀（_4000 = 4M、_8000 = 8M…）
+    //   data.rate       —— 接口**实际**给我们的档位（请求 0 却回 4 = 被降级）
+    //   data.multirates —— 该房间可用档位及各自 rate 值
+    if std::env::var("JUNLIVE_DUMP_DOUYU").is_ok() {
+        eprintln!(
+            "[douyu raw req rate={rate}] {}",
+            serde_json::to_string(&v).unwrap_or_default()
+        );
+    }
+    Ok(v)
 }
 
 /// 从 getH5PlayV1 的 data 里拼出一条可播地址
