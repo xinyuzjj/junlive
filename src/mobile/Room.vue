@@ -40,6 +40,7 @@ import {
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import Player from "../components/Player.vue";
+import { isEmbedPlatform } from "../embed";
 import { store } from "../store";
 import { soopMode } from "../soopMode";
 import {
@@ -81,6 +82,9 @@ watch(listSize, (v) => localStorage.setItem("junlive.dm_list_size", String(v)));
  */
 const fit = ref(localStorage.getItem("junlive.fit") || "contain");
 watch(fit, (v) => localStorage.setItem("junlive.fit", v));
+/** 官方 iframe 播放器的平台（YouTube）不需要我们解析播放地址，缺 plays 不该报错 */
+const isEmbed = computed(() => isEmbedPlatform(props.platform));
+
 const fitLabel = computed(
   () => ({ contain: "适应", fill: "拉伸", cover: "铺满" })[fit.value] ?? "适应",
 );
@@ -660,13 +664,19 @@ onBeforeUnmount(() => {
         alt=""
         @error="coverErr"
       />
+      <!--
+        只在**确实在直播**时渲染播放器：
+        否则官方 iframe（YouTube）会拿路由里的视频 ID 去播那条回放 ——
+        表现就是「不在直播却播了一段视频」。
+        room-id 要用**解析后**的：路由里的可能是频道或已过期的视频。
+      -->
       <Player
-        v-if="current"
+        v-if="detail?.live && (current || isEmbed)"
         :play="current"
         :plays="detail?.plays ?? []"
         :danmaku="msgs"
         :platform="props.platform"
-        :room-id="props.id"
+        :room-id="detail?.room_id || props.id"
         @pick="pick"
         @refresh="onRefresh"
       />

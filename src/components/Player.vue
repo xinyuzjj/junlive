@@ -466,15 +466,30 @@ function attach(p: PlayUrl | null) {
       err.value = "当前环境不支持 FLV 播放";
       return;
     }
+    // 缓冲**按平台区分**，别一刀切 —— 缓冲大 = 延迟大，不该给不需要的平台。
+    //
+    // - 斗鱼：FLV 直链每 300 秒被 CDN 主动断开，后端要续流，中间必然有一小段
+    //   没有数据。缓冲给到 6~12 秒才扛得住，代价就是延迟多几秒。
+    // - 虎牙：同样是 FLV，但直链不会被周期性切断，给大缓冲只是白白多延迟，
+    //   只留 1~3 秒抗抖动余量。
+    const flvLatency =
+      props.platform === "douyu"
+        ? { liveBufferLatencyMaxLatency: 12, liveBufferLatencyMinRemain: 6 }
+        : { liveBufferLatencyMaxLatency: 3, liveBufferLatencyMinRemain: 1 };
+
     const player = mpegts.createPlayer(
       { type: "flv", isLive: true, url: p.proxy },
       {
-        // 直播三件套：关 stash + 追帧 + 不用 worker。
         // 注意别加 autoCleanupSourceBuffer —— 它会把还没播到的关键帧清掉，
-        // 表现就是「播一会儿卡在缓存中」，上一版就是栽在这。
-        enableStashBuffer: false,
-        stashInitialSize: 128,
+        // 表现是「播一会儿卡在缓存中」，上一版就是栽在这。
+        enableStashBuffer: true,
+        // stashInitialSize 单位是**字节**（默认 384*1024）。之前写 128
+        // 等于 128 字节、形同没有，顺手改回默认值。
+        stashInitialSize: 384 * 1024,
+        // 有界追帧：缓冲超过 maxLatency 才追，追到剩 minRemain 停。
+        // 完全关掉的话延迟会无限累积（实测每次续流涨约 3 秒）。
         liveBufferLatencyChasing: true,
+        ...flvLatency,
         lazyLoad: false,
       },
     );
@@ -495,25 +510,35 @@ function attach(p: PlayUrl | null) {
   }
 
   if (Hls.isSupported()) {
-    // 直播流：不要开 lowLatencyMode。
-    // 低延迟模式靠「减小缓冲 + 快速追帧」换取延迟，网络一抖就露馅 ——
-    // 实测 Twitch 自建流会一卡一卡。观看直播不需要那点延迟差，
-    // 宁可多几秒延迟也要播放流畅，所以用默认的普通模式。
-    // 缓冲给到很大：直播是持续的小分片请求，只要有一两次延迟尖峰
-    // （实测本地代理节点抖动可达 84ms → 1891ms），小缓冲就会被瞬间耗尽，
-    // 于是播放器反复「缓冲中」。缓冲越大，越能扛住尖峰。
-    // 代价是进入房间后要等十几秒才起播，且直播延迟多十几秒 —— 换取不卡。
+    // 缓冲**按平台区分**，别一刀切 —— 缓冲大 = 延迟大。
+    //
+    // - 海外平台（Twitch / SOOP）必须走代理，实测代理节点延迟抖动可达
+    //   84ms → 1891ms，缓冲给小了会被瞬间抽干 → 反复「缓冲中」。
+    //   代价是延迟多十几秒、起播慢，换来不卡。
+    // - 国内平台（B站 / 抖音）直连，延迟本来就稳，给大缓冲只是白白多十几秒延迟，
+    //   完全没必要。
+    //
+    // 另外：都不要开 lowLatencyMode —— 它靠「减小缓冲 + 快速追帧」换延迟，
+    // 网络一抖就露馅（实测 Twitch 自建流会一卡一卡）。
+    const overseas = props.platform === "twitch" || props.platform === "soop";
+    const hlsBuf = overseas
+      ? {
+          liveSyncDurationCount: 8,
+          maxBufferLength: 60,
+          maxMaxBufferLength: 120,
+          fragLoadingMaxRetry: 10,
+        }
+      : {
+          liveSyncDurationCount: 3,
+          maxBufferLength: 15,
+          maxMaxBufferLength: 30,
+          fragLoadingMaxRetry: 4,
+        };
     const h = new Hls({
-      // 落后直播点多少个分片就往上追。调大 = 更愿意先攒缓冲再追，
-      // 减少「缓冲空了猛跳」这种卡顿。
-      liveSyncDurationCount: 8,
-      maxBufferLength: 60,
-      maxMaxBufferLength: 120,
+      ...hlsBuf,
       backBufferLength: 30,
       manifestLoadingMaxRetry: 6,
       manifestLoadingTimeOut: 30000,
-      // 分片失败时的重试放宽：代理抖动造成的失败应该重试而不是放弃。
-      fragLoadingMaxRetry: 10,
       fragLoadingRetryDelay: 800,
       // 缓冲快空时不要立刻 panic，而是先尝试补一段再决定。
       startFragPrefetch: true,

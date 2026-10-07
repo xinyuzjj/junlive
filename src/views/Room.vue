@@ -25,8 +25,12 @@ const router = useRouter();
  * 官方 iframe 自己处理，且不需要登录就能看（只读）。
  * embed_domain 必须和父页面同域，否则 YouTube 会拒绝渲染。
  */
-const isYtChat = computed(() => props.platform === "youtube");
-const ytChatSrc = computed(() => chatSrc(props.platform, props.id));
+// 油管聊天 iframe：只在**确实在直播**时显示，并且用**解析后**的视频 ID ——
+// 路由里的 ID 可能是频道或已过期的视频，直接拿去拼 live_chat 会指向错的东西。
+const isYtChat = computed(() => props.platform === "youtube" && !!detail.value?.live);
+const ytChatSrc = computed(() =>
+  chatSrc(props.platform, detail.value?.room_id || props.id),
+);
 
 /** 官方 iframe 播放器不需要我们解析播放地址，缺 plays 不该报错 */
 const isEmbed = computed(() => isEmbedPlatform(props.platform));
@@ -217,12 +221,18 @@ function toggleFollow() {
       <!-- 视频区（不滚动，等比铺满） -->
       <div ref="stageRef" class="stage">
         <div class="stage-inner" :style="playerStyle">
+          <!--
+            只在**确实在直播**时渲染播放器。
+            否则官方 iframe 播放器（YouTube）会拿路由里的视频 ID 去播那条回放 ——
+            表现就是「不在直播却播了一段视频」。
+          -->
           <Player
+            v-if="detail?.live"
             :play="current"
             :plays="detail?.plays ?? []"
             :danmaku="msgs"
             :platform="props.platform"
-            :room-id="props.id"
+            :room-id="detail?.room_id || props.id"
             @pick="pick"
             @refresh="onRefresh"
           />
