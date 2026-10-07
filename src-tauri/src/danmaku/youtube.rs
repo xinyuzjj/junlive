@@ -128,7 +128,17 @@ pub(super) async fn run_youtube(
     let mut cont = find_continuation(&data).ok_or("该直播没有开启聊天室")?;
 
     let key = between(&html, "\"INNERTUBE_API_KEY\":\"", "\"")
-        .unwrap_or_else(|| "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8".into());
+        // ⚠️ 这里**不要**再内置任何 API key。
+        // 曾经内置过一个 Google API Key 当兜底，被 GitHub secret scanning
+        // 判定为泄露（告警 #1）—— 仓库公开，内置 key 等于把配额送人。
+        // 正常情况下 INNERTUBE_API_KEY 都能从页面取到，走不到兜底；
+        // 真要兜底就用环境变量 JUNLIVE_YT_API_KEY。
+        .or_else(|| {
+            std::env::var("JUNLIVE_YT_API_KEY")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+        })
+        .ok_or("没能从页面取到 YouTube 内部 API key（可用环境变量 JUNLIVE_YT_API_KEY 指定）")?;
     let ver = between(&html, "\"INNERTUBE_CLIENT_VERSION\":\"", "\"")
         .unwrap_or_else(|| "2.20240101.00.00".into());
 
