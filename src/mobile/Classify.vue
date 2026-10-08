@@ -37,8 +37,18 @@ async function loadCats() {
   try {
     const cs = await getCategories(store.current);
     cats.value = cs;
-    curCat.value = cs[0]?.id ?? "";
-    sub.value = "";
+    // 恢复上次浏览的版块：Shell 用 v-if 切页，从直播间返回时本组件会重建，
+    // 不恢复就会跳回第一个分类（等于「返回就回平台首页」）。
+    const saved = store.catSel[store.current];
+    const hit = saved ? cs.find((c) => c.id === saved.parent) : undefined;
+    if (hit) {
+      curCat.value = hit.id;
+      sub.value =
+        saved && hit.children.some((x) => x.id === saved.sub) ? saved.sub : "";
+    } else {
+      curCat.value = cs[0]?.id ?? "";
+      sub.value = "";
+    }
   } catch (e) {
     err.value = String(e);
   }
@@ -75,11 +85,13 @@ async function loadRooms(reset = false) {
 function pickCat(id: string) {
   curCat.value = id;
   sub.value = "";
+  store.setCatSel(store.current, curCat.value, sub.value);
   void loadRooms(true);
 }
 
 function pickSub(id: string) {
   sub.value = id;
+  store.setCatSel(store.current, curCat.value, sub.value);
   void loadRooms(true);
 }
 

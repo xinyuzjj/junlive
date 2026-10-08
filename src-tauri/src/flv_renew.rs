@@ -268,7 +268,7 @@ pub async fn relay(
     // 只有量出来才知道该优化哪一段，别猜。
     let mut t_resolve: Option<Instant> = None;
     let mut t_first_chunk: Option<Instant> = None;
-    /// 接续时选中的关键帧相对已转发位置差多少毫秒（负值 = 小幅回退）
+    // 接续时选中的关键帧相对已转发位置差多少毫秒（负值 = 小幅回退）
     let mut kf_delta: i64 = 0;
 
     loop {

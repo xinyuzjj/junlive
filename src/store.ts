@@ -78,6 +78,16 @@ export const store = reactive({
   follows: loadFollows(),
 
   /**
+   * 每个平台上次浏览的版块（父分类 + 子分类）。
+   *
+   * 为什么放在 store：路由切换时 App.vue 的 `<router-view :key="$route.fullPath">`
+   * 会把 Home 整个销毁重建，组件里的 activeParent 会被重置成第一个分类 ——
+   * 表现就是「看完直播点返回，跳回平台首页，而不是刚才那个版块」。
+   * 状态放这里，重建后就能恢复。
+   */
+  catSel: {} as Record<string, { parent: string; sub: string }>,
+
+  /**
    * 主题模式：跟随系统 / 浅色 / 深色。
    *
    * 为什么把状态放在 store 而不是组件里：顶栏按钮、启动时的主题应用、
@@ -122,6 +132,11 @@ export const store = reactive({
   setPlatform(id: string) {
     this.current = id;
     localStorage.setItem("junlive.platform", id);
+  },
+
+  /** 记住这个平台当前在看的版块，返回首页时用来恢复。 */
+  setCatSel(platform: string, parent: string, sub: string) {
+    this.catSel[platform] = { parent, sub };
   },
 
   isFollowed(platform: string, roomId: string) {

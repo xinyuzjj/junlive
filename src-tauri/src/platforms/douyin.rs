@@ -40,15 +40,106 @@ const CATS: &[(&str, &str)] = &[
     ("户外", "9"),
 ];
 
+/// 抖音分类树 —— 从直播首页内嵌的 `categoryData` 里解析。
+///
+/// 首页 HTML 里带着**完整分类树**（每项有 `id_str` 和 `title`），
+/// 游戏下面还有「射击游戏 / MOBA」这类二级、以及「和平精英 / 绝地求生」三级。
+/// 这些 `id_str` 直接就能当 `partition` 参数用（实测都能拉到房间）。
+///
+/// 为什么不再硬编码：以前写死 6 个顶级项、且 `children` 全是空的，
+/// 所以抖音看不到任何子分类。
+async fn fetch_categories() -> Result<Vec<Category>, String> {
+    let c = net::direct();
+    let html = c
+        .get("https://live.douyin.com/")
+        .header("User-Agent", net::UA)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .text()
+        .await
+        .map_err(|e| e.to_string())?;
+    let arr = extract_category_array(&html).ok_or("抖音首页里没找到分类数据")?;
+    Ok(parse_categories(&arr))
+}
+
+/// 从首页 HTML 里抠出 `categoryData` 对应的数组。
+///
+/// 两个坑：
+/// 1. 它是**嵌在转义 JSON 字符串里**的（`categoryData\":[{\"partition\":...`），
+///    必须先把 `\"` 还原成 `"` 才能当 JSON 解析。
+/// 2. 必须**括号计数**取数组边界，不能用正则 —— 字符串值里同样有 `]`，
+///    非贪婪正则会在那里截断，得到一个残缺数组。
+fn extract_category_array(html: &str) -> Option<Value> {
+    let i = html.find("categoryData")?;
+    let end = (i + 300_000).min(html.len());
+    let seg = html[i..end].replace("\\\"", "\"").replace("\\\\", "\\");
+
+    let start = seg.find('[')?;
+    let mut depth = 0i32;
+    let mut in_str = false;
+    let mut esc = false;
+    for (k, ch) in seg[start..].char_indices() {
+        if in_str {
+            if esc {
+                esc = false;
+            } else if ch == '\\' {
+                esc = true;
+            } else if ch == '"' {
+                in_str = false;
+            }
+            continue;
+        }
+        match ch {
+            '"' => in_str = true,
+            '[' => depth += 1,
+            ']' => {
+                depth -= 1;
+                if depth == 0 {
+                    return serde_json::from_str(&seg[start..start + k + 1]).ok();
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// 把 `categoryData` 的节点递归转成 `Category`。
+fn parse_categories(v: &Value) -> Vec<Category> {
+    let mut out = Vec::new();
+    let Some(arr) = v.as_array() else {
+        return out;
+    };
+    for item in arr {
+        let p = &item["partition"];
+        let id = p["id_str"].as_str().unwrap_or("");
+        let name = p["title"].as_str().unwrap_or("");
+        if id.is_empty() || name.is_empty() {
+            continue;
+        }
+        out.push(Category {
+            id: id.to_string(),
+            name: name.to_string(),
+            children: parse_categories(&item["sub_partition"]),
+        });
+    }
+    out
+}
+
 pub async fn categories() -> Result<Vec<Category>, String> {
-    Ok(CATS
-        .iter()
-        .map(|(n, id)| Category {
-            id: (*id).to_string(),
-            name: (*n).to_string(),
-            children: vec![],
-        })
-        .collect())
+    match fetch_categories().await {
+        Ok(v) if !v.is_empty() => Ok(v),
+        // 首页结构变了就退回硬编码的六个顶级项，至少别让分类页空着
+        _ => Ok(CATS
+            .iter()
+            .map(|(n, id)| Category {
+                id: (*id).to_string(),
+                name: (*n).to_string(),
+                children: vec![],
+            })
+            .collect()),
+    }
 }
 
 /// 百分比编码（a_bogus 里可能带 + / = 等字符）

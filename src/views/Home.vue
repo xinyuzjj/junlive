@@ -67,6 +67,8 @@ const rooms = ref<Room[]>([]);
 const page = ref(1);
 const loading = ref(false);
 const loadingMore = ref(false);
+/** 到底了：翻页翻不出新房间时置位（有些平台的 offset 被接口忽略）。 */
+const noMore = ref(false);
 const error = ref("");
 const keyword = ref("");
 const isSearch = ref(false);
@@ -102,9 +104,24 @@ async function loadCategories() {
   try {
     const cats = await getCategories(store.current);
     categories.value = cats;
-    activeParent.value = firstCat(cats);
-    const p = cats.find((c) => c.id === activeParent.value);
-    activeSub.value = p && p.children.length ? p.children[0].id : "";
+    // 恢复上次浏览的版块：路由切换时 App.vue 的 router-view 带 :key="$route.fullPath"，
+    // Home 会被销毁重建，不恢复的话每次看完直播返回都被重置成第一个分类，
+    // 用户就得「返回首页 → 点版块」反复点。
+    const saved = store.catSel[store.current];
+    const hit = saved ? cats.find((c) => c.id === saved.parent) : undefined;
+    if (hit) {
+      activeParent.value = hit.id;
+      const subOk = !!saved && hit.children.some((x) => x.id === saved.sub);
+      activeSub.value = subOk
+        ? saved!.sub
+        : hit.children.length
+          ? hit.children[0].id
+          : "";
+    } else {
+      activeParent.value = firstCat(cats);
+      const p = cats.find((c) => c.id === activeParent.value);
+      activeSub.value = p && p.children.length ? p.children[0].id : "";
+    }
   } catch (e) {
     error.value = `获取分类失败：${e}`;
   }
@@ -137,7 +154,17 @@ async function loadRooms(reset = true) {
   loading.value = reset;
   try {
     const r = await getRooms(store.current, currentCatId.value, page.value);
-    rooms.value = reset ? r.rooms : [...rooms.value, ...r.rooms];
+    if (reset) {
+      rooms.value = r.rooms;
+      noMore.value = false;
+    } else {
+      // 抖音的 offset 被接口忽略：翻页返回的是同一批房间，直接追加就是一堆重复。
+      // 这里按 room_id 去重；一条新的都没有就说明翻不动了，标记到底、把按钮收起来。
+      const seen = new Set(rooms.value.map((x) => x.room_id));
+      const fresh = r.rooms.filter((x) => !seen.has(x.room_id));
+      rooms.value = [...rooms.value, ...fresh];
+      if (!fresh.length) noMore.value = true;
+    }
     error.value = rooms.value.length ? "" : `${store.platformName(store.current)} 暂时没有返回数据`;
   } catch (e) {
     error.value = `${e}`;
@@ -174,6 +201,10 @@ function pickParent(id: string) {
   activeSub.value = p && p.children.length ? p.children[0].id : "";
   isSearch.value = false;
   keyword.value = "";
+  // 选完立刻收起：斗鱼有 524 个顶级分类，不收起来整个屏幕都是分类标签，
+  // 房间列表被顶到可视区外，看着像「点了没反应」。
+  expandCats.value = false;
+  store.setCatSel(store.current, activeParent.value, activeSub.value);
   loadRooms(true);
 }
 
@@ -181,6 +212,7 @@ function pickSub(id: string) {
   activeSub.value = id;
   isSearch.value = false;
   keyword.value = "";
+  store.setCatSel(store.current, activeParent.value, activeSub.value);
   loadRooms(true);
 }
 
@@ -267,7 +299,7 @@ watch(() => store.follows.length, loadFavStatus);
     <!-- 右侧 -->
     <section class="main">
       <div class="cats">
-        <div class="cat-row">
+        <div class="cat-row" :class="{ expanded: expandCats }">
           <button
             v-for="c in shownParents"
             :key="c.id"
@@ -374,9 +406,15 @@ watch(() => store.follows.length, loadFavStatus);
       </div>
 
       <div v-if="rooms.length && !isSearch" class="foot">
-        <button class="ghost round" :disabled="loadingMore" @click="more">
+        <button
+          v-if="!noMore"
+          class="ghost round"
+          :disabled="loadingMore"
+          @click="more"
+        >
           {{ loadingMore ? "加载中…" : "加载更多" }}
         </button>
+        <span v-else class="foot-end">没有更多了</span>
       </div>
     </section>
   </div>
@@ -581,6 +619,25 @@ watch(() => store.follows.length, loadFavStatus);
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+/**
+ * 展开态的分类列表。
+ *
+ * 斗鱼有 524 个顶级分类，如果让 flex-wrap 自然铺开，这一块会撑到比屏幕还高，
+ * 而 `.cats` 是 flex:none、外层 `.main` 又是 overflow:hidden —— 房间列表直接被
+ * 顶出可视区且没法滚动，用户看到的就是「满屏分类、点了没用、卡死」。
+ * 所以展开时必须限高 + 可滚，选完再由 pickParent 收起。
+ */
+.cat-row.expanded {
+  max-height: 42vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 6px;
+  align-content: flex-start;
+}
+.foot-end {
+  font-size: 13px;
+  color: var(--fg-dim);
 }
 .sub-row {
   margin-top: 10px;

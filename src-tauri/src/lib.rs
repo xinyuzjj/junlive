@@ -317,7 +317,9 @@ pub fn cli_test(args: &[String]) {
             "rooms" => {
                 let p = args.get(1).cloned().unwrap_or_default();
                 let c = args.get(2).cloned().unwrap_or_default();
-                match platforms::rooms(&p, &c, 1).await {
+                // 可选页码：`rooms <plat> <cat> [page]`，用来验翻页有没有重复
+                let pg: u32 = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(1);
+                match platforms::rooms(&p, &c, pg).await {
                     Ok(r) => {
                         println!("共 {} 个房间", r.rooms.len());
                         for x in r.rooms.iter().take(10) {

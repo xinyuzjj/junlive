@@ -10,7 +10,7 @@
  */
 import { openUrl } from "@tauri-apps/plugin-opener";
 
-const VERSION = "1.2.3";
+const VERSION = "1.2.4";
 const REPO = "https://github.com/xinyuzjj/junlive";
 const RELEASES = `${REPO}/releases/latest`;
 const ISSUES = `${REPO}/issues`;
