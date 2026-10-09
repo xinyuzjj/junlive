@@ -94,6 +94,32 @@ const bufEnd = ref(0);
 const showCtrl = ref(true);
 const showLines = ref(false);
 
+/**
+ * 自动播放被拒 → 需要用户点一下画面才能起播。
+ *
+ * 之前 `autoplay()` 里第二次重试的失败是 `.catch(() => {})` —— 静默吞掉。
+ * 后果是**起播失败时用户完全看不出发生了什么**：没有报错、没有提示，
+ * 画面停在第一帧（有时还播了一小段声音，因为声音在失败前已经起播），
+ * 看起来就像「一直卡在缓冲中」。
+ *
+ * 现在置位 needTapToPlay，UI 会明确提示「点一下播放」，
+ * 而不是让人对着一个永远不动的画面干瞪眼。
+ */
+const needTapToPlay = ref(false);
+
+/** 用户点了画面（或点了播放按钮）：重新起播并清掉提示 */
+function resumeFromTap() {
+  const v = videoRef.value;
+  if (!v) return;
+  needTapToPlay.value = false;
+  v.play()
+    .then(() => {
+      playing.value = true;
+      poke();
+    })
+    .catch(() => {});
+}
+
 /** 按画质分组，每组是该画质下的若干条 CDN 线路 */
 const qualities = computed(() => {
   const m = new Map<string, PlayUrl[]>();
@@ -310,8 +336,10 @@ function jumpLive() {
 function toggle() {
   const v = videoRef.value;
   if (!v) return;
-  if (v.paused) v.play().catch(() => {});
-  else v.pause();
+  if (v.paused) {
+    needTapToPlay.value = false;
+    v.play().catch(() => {});
+  } else v.pause();
 }
 
 function toggleMute() {
@@ -464,11 +492,16 @@ function attach(p: PlayUrl | null) {
         poke();
       })
       .catch(() => {
+        // 第一次失败（多半是带声音的自动播放被拒）→ 降级静音重试。
         v.muted = true;
         muted.value = true;
         v.play()
           .then(() => (playing.value = true))
-          .catch(() => {});
+          .catch(() => {
+            // 第二次也失败：**不要静默吞掉**（详见 needTapToPlay 的注释）。
+            // 置位后 UI 会提示「点一下播放」，用户点一下就恢复。
+            needTapToPlay.value = true;
+          });
       });
   };
 
@@ -871,6 +904,15 @@ defineExpose({ reload, seek });
     <div v-if="status && !isEmbed" class="veil">
       <div class="spinner"></div>
       <div class="veil-text">{{ status }}</div>
+    </div>
+
+    <!--
+      自动播放被拒：明确告诉用户点一下，而不是让画面静止着、
+      也不给任何提示（之前是 .catch(() => {}) 静默吞掉，看起来像「卡在缓冲」）。
+    -->
+    <div v-if="needTapToPlay && !isEmbed" class="veil">
+      <div class="veil-text">点击画面开始播放</div>
+      <button class="primary" @click.stop="resumeFromTap">播放</button>
     </div>
 
     <div v-if="err && !isEmbed" class="veil error">
