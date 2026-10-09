@@ -121,6 +121,7 @@ pub async fn rooms(category: &str, page: u32) -> Result<RoomList, String> {
                     ),
                     live: true,
                     avatar: r["sAvatar180"].as_str().unwrap_or("").to_string(),
+                    replay: false,
                 });
             }
         }
@@ -171,6 +172,7 @@ pub async fn rooms(category: &str, page: u32) -> Result<RoomList, String> {
                 ),
                 live: true,
                 avatar: r["avatar180"].as_str().unwrap_or("").to_string(),
+                replay: false,
             });
         }
     }
@@ -241,6 +243,7 @@ pub async fn search(keyword: &str, page: u32) -> Result<RoomList, String> {
                         ),
                         live: r["gameLiveOn"].as_bool().unwrap_or(true),
                         avatar: r["game_avatarUrl180"].as_str().unwrap_or("").to_string(),
+                        replay: false,
                     });
                 }
             }
@@ -297,7 +300,8 @@ pub async fn room_detail(room_id: &str) -> Result<RoomDetail, String> {
             .as_str()
             .unwrap_or("")
             .to_string(),
-    };
+            replay: false,
+        };
 
     let mut plays = Vec::new();
     if live {
@@ -446,6 +450,7 @@ fn extract_plays(d: &Value, room_id: &str) -> Option<Vec<PlayUrl>> {
                     url,
                     format: "flv".into(),
                     quality: "FLV 原画".into(),
+                    qualities: vec![],
                 });
             }
             // HLS 跳过：403，且 DTV 只用 FLV

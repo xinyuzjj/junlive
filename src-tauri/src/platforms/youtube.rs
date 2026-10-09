@@ -161,6 +161,7 @@ pub async fn search(keyword: &str, page: u32) -> Result<RoomList, String> {
                 online: text_of(&v["viewCountText"]),
                 live,
                 avatar: String::new(),
+                replay: false,
             });
         }
     }
@@ -365,6 +366,7 @@ pub async fn room_detail(room_id: &str) -> Result<RoomDetail, String> {
             .unwrap_or_default(),
         live,
         avatar: String::new(),
+        replay: false,
     };
 
     let mut plays = Vec::new();
@@ -374,6 +376,7 @@ pub async fn room_detail(room_id: &str) -> Result<RoomDetail, String> {
             url: hls.to_string(),
             format: "hls".into(),
             quality: "自动".into(),
+            qualities: vec![],
         });
     }
 

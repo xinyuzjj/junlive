@@ -19,6 +19,13 @@ const props = defineProps<{
   play: PlayUrl | null;
   plays?: PlayUrl[];
   danmaku?: DanmakuMsg[];
+  /**
+   * 历史弹幕（回放用）：每条带 `time`（视频内秒数），按进度飘出来。
+   *
+   * 跟 `danmaku` 的区别：`danmaku` 是直播的「来一条加一条」，
+   * 这个是「一整份带时间轴的」——播放到哪就飘到哪。
+   */
+  timedDanmaku?: { time: number; text: string; color: string; user: string }[];
   platform?: string;
   roomId?: string;
 }>();
@@ -33,6 +40,10 @@ const emit = defineEmits<{
    * 怎么重试都没用。所以必须往上报，让上层拿新地址回来。
    */
   (e: "refresh"): void;
+  /** 播完了（回放用来续下一段） */
+  (e: "ended"): void;
+  /** 飘出了一条历史弹幕（上层拿去填弹幕列表） */
+  (e: "timed-dm", m: { time: number; text: string; color: string; user: string }): void;
 }>();
 
 /**
@@ -714,7 +725,7 @@ function flushDm() {
 }
 
 /** 把一条弹幕丢到公屏上飘 */
-function flyDanmaku(text: string, color: string) {
+function flyDanmaku(text: string, color = "") {
   if (!dmOn.value || !text.trim()) return;
   if (isBlocked(text)) return;
   const h = wrapRef.value?.clientHeight || 400;
@@ -753,7 +764,53 @@ watch(
   },
 );
 
-defineExpose({ reload });
+/* ---------------- 历史弹幕（回放） ----------------
+ *
+ * 整份弹幕是按时间轴来的，播放到哪就飘到哪。
+ * 用 <video> 的 timeupdate（约 4 次/秒）驱动：够及时，又不用 rAF 空转。
+ */
+const timedList = computed(() =>
+  [...(props.timedDanmaku ?? [])].sort((a, b) => a.time - b.time),
+);
+let timedIdx = 0;
+
+// 换了一份弹幕（换段/换场次）就重头来
+watch(
+  () => props.timedDanmaku,
+  () => {
+    timedIdx = 0;
+  },
+);
+
+function pumpTimedDm() {
+  const v = videoRef.value;
+  const list = timedList.value;
+  if (!v || !list.length) return;
+  const t = v.currentTime;
+  // 拖动进度条之后游标要重新定位，否则要么补飘一大堆、要么再也不飘
+  if (timedIdx > 0 && list[timedIdx - 1] && list[timedIdx - 1].time > t + 1) {
+    let i = 0;
+    while (i < list.length && list[i].time < t) i++;
+    timedIdx = i;
+    return;
+  }
+  // 一次最多补 6 条，避免刚起播时刷屏
+  let fired = 0;
+  while (timedIdx < list.length && list[timedIdx].time <= t && fired < 6) {
+    const m = list[timedIdx++];
+    fired++;
+    if (dmOn.value) flyDanmaku(m.text, m.color);
+    emit("timed-dm", m);
+  }
+}
+
+/** 跳到指定秒（回放看点用） */
+function seek(t: number) {
+  const v = videoRef.value;
+  if (v) v.currentTime = Math.max(0, t);
+}
+
+defineExpose({ reload, seek });
 </script>
 
 <template>
@@ -805,6 +862,8 @@ defineExpose({ reload });
       @click.stop="toggle"
       @play="onPlay"
       @pause="onPause"
+      @timeupdate="pumpTimedDm"
+      @ended="emit('ended')"
       @waiting="status = status || '缓冲中…'"
       @playing="status = ''"
     ></video>

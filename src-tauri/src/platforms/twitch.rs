@@ -85,7 +85,8 @@ pub async fn rooms(category: &str, page: u32) -> Result<RoomList, String> {
                     .as_str()
                     .unwrap_or("")
                     .to_string(),
-            });
+                    replay: false,
+                });
         }
     }
     Ok(RoomList {
@@ -121,6 +122,7 @@ pub async fn search(keyword: &str, page: u32) -> Result<RoomList, String> {
                 online: fmt_num(u["stream"]["viewersCount"].as_i64().unwrap_or(0)),
                 live,
                 avatar: u["profileImageURL"].as_str().unwrap_or("").to_string(),
+                replay: false,
             });
         }
     }
@@ -161,6 +163,7 @@ pub async fn room_detail(login: &str) -> Result<RoomDetail, String> {
         online: fmt_num(u["stream"]["viewersCount"].as_i64().unwrap_or(0)),
         live,
         avatar: u["profileImageURL"].as_str().unwrap_or("").to_string(),
+        replay: false,
     };
 
     let mut plays = Vec::new();
@@ -216,6 +219,7 @@ async fn play_urls(login: &str) -> Result<Vec<PlayUrl>, String> {
         url,
         format: "hls".into(),
         quality: "自动（含所有清晰度）".into(),
+        qualities: vec![],
     }])
 }
 

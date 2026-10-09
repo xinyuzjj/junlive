@@ -8,6 +8,11 @@ export interface FollowItem {
   avatar: string;
   added: number;
   /**
+   * 在放录播（斗鱼视频轮播）。跟 live 一起持久化 —— 绿点表示真在直播、
+   * 黄点表示房间在播但内容是录像，刷新出来之前顺序/颜色就是对的。
+   */
+  replay?: boolean;
+  /**
    * 直播状态，**持久化**在关注记录里。
    *
    * 参考 DTV：不要在进页面时临时拉一次就丢 —— 那样刷新出来之前顺序是乱的。
@@ -85,7 +90,7 @@ export const store = reactive({
    * 表现就是「看完直播点返回，跳回平台首页，而不是刚才那个版块」。
    * 状态放这里，重建后就能恢复。
    */
-  catSel: {} as Record<string, { parent: string; sub: string }>,
+  catSel: {} as Record<string, { parent: string; sub: string; subsub?: string }>,
 
   /**
    * 主题模式：跟随系统 / 浅色 / 深色。
@@ -135,8 +140,8 @@ export const store = reactive({
   },
 
   /** 记住这个平台当前在看的版块，返回首页时用来恢复。 */
-  setCatSel(platform: string, parent: string, sub: string) {
-    this.catSel[platform] = { parent, sub };
+  setCatSel(platform: string, parent: string, sub: string, subsub = "") {
+    this.catSel[platform] = { parent, sub, subsub };
   },
 
   isFollowed(platform: string, roomId: string) {
@@ -169,12 +174,21 @@ export const store = reactive({
    * 写入某个关注主播的直播状态（同时落盘）。
    * 状态持久化后，下次进页面不用等异步就能排对顺序。
    */
-  setFollowLive(platform: string, roomId: string, live: FollowItem["live"]) {
+  setFollowLive(
+    platform: string,
+    roomId: string,
+    live: FollowItem["live"],
+    replay = false,
+  ) {
     const f = this.follows.find(
       (x) => x.platform === platform && x.room_id === roomId,
     );
-    if (!f || f.live === live) return;
+    if (!f) return;
+    // replay 要跟 live 一起判：只看 live 不变就 return 的话，
+    // 房间从「直播」切成「录播」时黄点不会出现。
+    if (f.live === live && !!f.replay === !!replay) return;
     f.live = live;
+    f.replay = replay;
     localStorage.setItem(FOLLOW_KEY, JSON.stringify(this.follows));
   },
 

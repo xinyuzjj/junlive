@@ -124,6 +124,7 @@ pub async fn search(keyword: &str, page: u32) -> Result<RoomList, String> {
                 online: fmt_num(r["online"].as_i64().unwrap_or(0)),
                 live: r["live_status"].as_i64().unwrap_or(1) == 1,
                 avatar: fix_url(r["uface"].as_str().unwrap_or("")),
+                replay: false,
             });
         }
     }
@@ -198,6 +199,7 @@ pub async fn room_detail(room_id: &str) -> Result<RoomDetail, String> {
         online: fmt_num(info["data"]["online"].as_i64().unwrap_or(0)),
         live,
         avatar: fix_url(anchor["data"]["info"]["face"].as_str().unwrap_or("")),
+        replay: false,
     };
 
     let mut plays = Vec::new();
@@ -292,6 +294,7 @@ pub async fn play_urls(rid: i64) -> Result<Vec<PlayUrl>, String> {
                             url: full,
                             format: if is_hls { "hls".into() } else { "flv".into() },
                             quality: q,
+                            qualities: vec![],
                         },
                     ));
                     break; // 每个 codec 只取第一个可用 host

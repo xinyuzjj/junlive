@@ -110,6 +110,49 @@ pub async fn room_detail(platform: &str, room_id: &str) -> Result<RoomDetail, St
     }
 }
 
+/// 主播的直播回放。目前只有斗鱼提供 —— 其他平台明确报「不支持」，
+/// 不要静默返回空列表，否则前端分不清「没有回放」和「平台不支持」。
+pub async fn replays(platform: &str, room_id: &str, page: u32) -> Result<ReplayPage, String> {
+    match platform {
+        "douyu" => douyu::replays(room_id, page).await,
+        other => Err(format!("{} 暂不支持查看回放", display_name(other))),
+    }
+}
+
+/// 一场回放的完整分段（当前只有斗鱼）。
+pub async fn replay_parts(
+    platform: &str,
+    room_id: &str,
+    hash_id: &str,
+    show_start: i64,
+) -> Result<Vec<Replay>, String> {
+    match platform {
+        "douyu" => douyu::replay_parts(room_id, hash_id, show_start).await,
+        other => Err(format!("{} 暂不支持查看回放", display_name(other))),
+    }
+}
+
+/// 一场回放的历史弹幕。
+pub async fn replay_danmaku(platform: &str, hash_id: &str, start_time: i64) -> Result<Vec<ReplayDanmaku>, String> {
+    match platform {
+        "douyu" => douyu::replay_danmaku(hash_id, start_time).await,
+        other => Err(format!("{} 暂不支持查看回放", display_name(other))),
+    }
+}
+
+/// 一场回放的 AI 看点。
+pub async fn replay_highlights(
+    platform: &str,
+    hash_id: &str,
+    start_time: i64,
+    duration: i64,
+) -> Result<Vec<ReplayHighlight>, String> {
+    match platform {
+        "douyu" => douyu::replay_highlights(hash_id, start_time, duration).await,
+        other => Err(format!("{} 暂不支持查看回放", display_name(other))),
+    }
+}
+
 /// 平台 id → 显示名
 pub fn display_name(platform: &str) -> String {
     all()

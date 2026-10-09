@@ -164,6 +164,7 @@ pub async fn rooms(category: &str, page: u32) -> Result<RoomList, String> {
             live: true,
             // 列表接口不带头像，进房间时再用 station 接口补
             avatar: String::new(),
+            replay: false,
         });
     }
     let total: u64 = v["total_cnt"]
@@ -213,6 +214,7 @@ pub async fn search(keyword: &str, page: u32) -> Result<RoomList, String> {
             online: fmt_cnt(it["favorite_cnt"].as_str().unwrap_or("")),
             live: true,
             avatar: logo,
+            replay: false,
         });
     }
     Ok(RoomList {
@@ -275,6 +277,7 @@ pub async fn room_detail(bjid: &str) -> Result<RoomDetail, String> {
         online: fmt_cnt(ch["CTUSER"].as_str().unwrap_or("")),
         live,
         avatar,
+        replay: false,
     };
 
     let plays = if live {
@@ -349,6 +352,7 @@ async fn build_plays(ch: &Value, bjid: &str, bno: &str) -> Vec<PlayUrl> {
             url,
             format: "hls".into(),
             quality: label.to_string(),
+            qualities: vec![],
         });
     }
 

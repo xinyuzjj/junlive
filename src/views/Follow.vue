@@ -140,6 +140,7 @@ function importJson() {
           </div>
         </div>
         <span v-if="isOff(f)" class="badge-off">未开播</span>
+        <span v-else-if="f.replay" class="badge-replay">录播</span>
         <button class="del" @click.stop="store.toggleFollow({ platform: f.platform, room_id: f.room_id } as any)">
           ✕
         </button>
@@ -207,6 +208,15 @@ function importJson() {
   font-size: 11px;
   color: var(--fg-dim);
   background: var(--chip);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+/* 在放录播（斗鱼视频轮播）：房间在推流但内容是录像 */
+.badge-replay {
+  flex: none;
+  font-size: 11px;
+  color: #fff;
+  background: var(--warn);
   border-radius: 4px;
   padding: 2px 6px;
 }

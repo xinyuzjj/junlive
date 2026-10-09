@@ -420,10 +420,23 @@ async fn handle(
         .to_string();
     let clen = resp.headers().get(header::CONTENT_LENGTH).cloned();
     let crange = resp.headers().get(header::CONTENT_RANGE).cloned();
+    // 判断「这是不是 m3u8 播放列表」。
+    //
+    // content-type 是准的（m3u8 = application/vnd.apple.mpegurl，
+    // 分片 = video/mp2t），所以以它为主。
+    //
+    // URL 兜底那两条要小心：**不能只看 url 里有没有 "playlist"** ——
+    // 斗鱼回放的分片文件名就叫 `playlist_0.ts`，会被误判成播放列表，
+    // 然后被当文本逐行重写 → 分片返回 0 字节，播放器一直转圈。
+    // 所以先把明确的分片/媒体后缀排掉。
+    let looks_segment = e.url.contains(".ts")
+        || e.url.contains(".m4s")
+        || e.url.contains(".mp4")
+        || e.url.contains(".aac");
     let is_m3u8 = ct.contains("mpegurl")
         || ct.contains("x-mpegURL")
         || e.url.contains(".m3u8")
-        || e.url.contains("playlist");
+        || (e.url.contains("playlist") && !looks_segment);
 
     if is_m3u8 && status.is_success() {
         let text = resp.text().await.unwrap_or_default();

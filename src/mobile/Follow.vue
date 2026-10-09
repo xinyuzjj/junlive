@@ -74,6 +74,8 @@ function initial(f: FollowItem) {
  *   未知 → --border-2（更浅的中性色，避免被误当成在播）
  */
 function liveColor(f: FollowItem): string {
+  // 在放录播：房间在推流但内容是录像，用黄色跟真直播区分开
+  if (f.live === "LIVE" && f.replay) return "var(--warn)";
   if (f.live === "LIVE") return "var(--brand)";
   if (f.live === "OFFLINE") return "var(--fg-dim)";
   return "var(--border-2)";
@@ -81,6 +83,7 @@ function liveColor(f: FollowItem): string {
 
 /** 状态文案：Simple Live 明确写出「直播中 / 未开播」，比只有色点更清楚 */
 function liveText(f: FollowItem): string {
+  if (f.live === "LIVE" && f.replay) return "录播中";
   if (f.live === "LIVE") return "直播中";
   if (f.live === "OFFLINE") return "未开播";
   return "未知";

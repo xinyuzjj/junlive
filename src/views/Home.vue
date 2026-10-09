@@ -48,11 +48,12 @@ async function loadFavStatus() {
             f.platform,
             f.room_id,
             d.live ? "LIVE" : "OFFLINE",
+            d.replay,
           );
           store.setFollowInfo(f.platform, f.room_id, d.streamer, d.avatar);
         } catch {
           // 拉不到时不能谎报「在播」，标成未知（DTV 的做法）
-          store.setFollowLive(f.platform, f.room_id, "UNKNOWN");
+          store.setFollowLive(f.platform, f.room_id, "UNKNOWN", false);
         }
       }
     },
@@ -63,6 +64,13 @@ async function loadFavStatus() {
 const categories = ref<Category[]>([]);
 const activeParent = ref("");
 const activeSub = ref("");
+/**
+ * 第三级分类（如 游戏 → 射击游戏 → 绝地求生 / 守望先锋）。
+ *
+ * 抖音把「吃鸡」「守望先锋」放在第三层，只支持两级的话根本点不到 ——
+ * 用户反馈想要这两个版块，就是卡在这里。
+ */
+const activeSubSub = ref("");
 const rooms = ref<Room[]>([]);
 const page = ref(1);
 const loading = ref(false);
@@ -86,7 +94,16 @@ const subs = computed(() => {
   return [{ id: p.id, name: "全部" }, ...p.children];
 });
 
-const currentCatId = computed(() => activeSub.value || activeParent.value);
+const currentCatId = computed(
+  () => activeSubSub.value || activeSub.value || activeParent.value,
+);
+
+/** 当前二级分类下的三级分类（没有就空） */
+const subsubs = computed(() => {
+  const p = parents.value.find((c) => c.id === activeParent.value);
+  const s = p?.children.find((c) => c.id === activeSub.value);
+  return s && s.children.length ? s.children : [];
+});
 
 const title = computed(() =>
   isSearch.value ? `「${keyword.value}」` : store.platformName(store.current),
@@ -100,6 +117,7 @@ async function loadCategories() {
   categories.value = [];
   activeParent.value = "";
   activeSub.value = "";
+  activeSubSub.value = "";
   error.value = "";
   try {
     const cats = await getCategories(store.current);
@@ -117,6 +135,7 @@ async function loadCategories() {
         : hit.children.length
           ? hit.children[0].id
           : "";
+      activeSubSub.value = saved?.subsub ?? "";
     } else {
       activeParent.value = firstCat(cats);
       const p = cats.find((c) => c.id === activeParent.value);
@@ -174,10 +193,25 @@ async function loadRooms(reset = true) {
 }
 
 async function more() {
+  if (loadingMore.value || noMore.value) return;
   loadingMore.value = true;
   page.value += 1;
   await loadRooms(false);
   loadingMore.value = false;
+}
+
+/**
+ * 滚到底自动加载下一页。
+ *
+ * 用户反馈：以前只能点「加载更多」，一次只加一页，想找一个主播要连点很多次。
+ * 现在滚到接近底部就自动续页（按钮保留，当兜底和「正在加载」提示）。
+ * 搜索页不自动加载 —— 那边结果少，没必要。
+ */
+function onGridScroll(e: Event) {
+  if (noMore.value || loadingMore.value || loading.value || isSearch.value) return;
+  const el = e.currentTarget as HTMLElement;
+  // 提前 240px 触发，滚动手感上不会「撞到底才转圈」
+  if (el.scrollTop + el.clientHeight >= el.scrollHeight - 240) void more();
 }
 
 function refresh() {
@@ -208,8 +242,16 @@ function pickParent(id: string) {
   loadRooms(true);
 }
 
+function pickSubSub(id: string) {
+  activeSubSub.value = id;
+  expandCats.value = false;
+  store.setCatSel(store.current, activeParent.value, activeSub.value, activeSubSub.value);
+  loadRooms(true);
+}
+
 function pickSub(id: string) {
   activeSub.value = id;
+  activeSubSub.value = "";
   isSearch.value = false;
   keyword.value = "";
   store.setCatSel(store.current, activeParent.value, activeSub.value);
@@ -273,16 +315,19 @@ watch(() => store.follows.length, loadFavStatus);
             <div class="fav-name ellipsis">{{ f.streamer || f.room_id }}</div>
             <div class="fav-sub ellipsis">{{ store.platformName(f.platform) }}</div>
           </div>
-          <!-- 绿=直播中，灰=未开播，暗黄=状态未知 -->
+          <!-- 绿=直播中，黄=在放录播，灰=未开播，暗灰=状态未知 -->
           <span
             class="live-dot"
             :class="{
-              on: f.live === 'LIVE',
+              on: f.live === 'LIVE' && !f.replay,
+              replay: f.live === 'LIVE' && !!f.replay,
               unknown: f.live === 'UNKNOWN' || !f.live,
             }"
             :title="
               f.live === 'LIVE'
-                ? '直播中'
+                ? f.replay
+                  ? '在放录播'
+                  : '直播中'
                 : f.live === 'OFFLINE'
                   ? '未开播'
                   : '状态未知'
@@ -329,6 +374,19 @@ watch(() => store.follows.length, loadFavStatus);
             {{ s.name }}
           </button>
         </div>
+
+        <!-- 第三级（游戏 → 射击游戏 → 绝地求生/守望先锋） -->
+        <div v-if="subsubs.length" class="sub-row sub-row-3">
+          <button
+            v-for="s in subsubs"
+            :key="s.id"
+            class="pill tiny"
+            :class="{ active: activeSubSub === s.id && !isSearch }"
+            @click="pickSubSub(s.id)"
+          >
+            {{ s.name }}
+          </button>
+        </div>
       </div>
 
       <div class="head">
@@ -341,7 +399,7 @@ watch(() => store.follows.length, loadFavStatus);
         </button>
       </div>
 
-      <div class="grid-wrap">
+      <div class="grid-wrap" @scroll.passive="onGridScroll">
         <div v-if="loading" class="grid">
           <div v-for="i in 12" :key="i" class="card sk">
             <div class="thumb sk-block"></div>
@@ -533,6 +591,12 @@ watch(() => store.follows.length, loadFavStatus);
   background: var(--green);
   box-shadow: 0 0 0 3px rgba(0, 200, 83, 0.18);
 }
+/* 在放录播：房间在推流、show_status 也是 1，但内容是录像 —— 用黄点区分，
+   不然会被当成「正在直播」点进去（斗鱼的 videoLoop=1） */
+.live-dot.replay {
+  background: var(--warn);
+  box-shadow: 0 0 0 3px rgba(240, 160, 32, 0.18);
+}
 /* 状态未知（还没查到 / 拉失败） */
 .live-dot.unknown {
   background: var(--fg-mute);
@@ -615,6 +679,16 @@ watch(() => store.follows.length, loadFavStatus);
   border-bottom: 1px solid var(--border);
 }
 .cat-row,
+.sub-row-3 {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--border-2);
+}
+.pill.tiny {
+  height: 22px;
+  padding: 0 9px;
+  font-size: 11.5px;
+}
 .sub-row {
   display: flex;
   flex-wrap: wrap;

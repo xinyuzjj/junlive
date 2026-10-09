@@ -22,6 +22,14 @@ export interface Room {
   area: string;
   online: string;
   live: boolean;
+  /**
+   * 在放录播（斗鱼：`videoLoop == 1`，即视频轮播）。
+   *
+   * 这类房间 `live` 仍是 true（`show_status=1`、也确实在推流），但内容是录像。
+   * 注意：**只有房间详情接口（betard）有这个字段**，分类列表接口没有，
+   * 所以列表里的房间拿到的永远是 false —— 只有关注栏和直播间页能拿到真实值。
+   */
+  replay?: boolean;
   avatar: string;
 }
 
@@ -30,6 +38,61 @@ export interface PlayUrl {
   proxy: string;
   format: string;
   quality: string;
+  /** 可选清晰度（目前只有回放有） */
+  qualities?: ReplayQuality[];
+}
+
+/** 回放的一档清晰度 */
+export interface ReplayQuality {
+  /** 档位 id，如 normal / high / 1080p60 / 1440p60a */
+  id: string;
+  /** 显示名，如「高清1080P60」 */
+  name: string;
+  /** 上游真实地址 */
+  url: string;
+  /** 走本地代理后的地址（前端播这个） */
+  proxy: string;
+  /** 码率（bps） */
+  bitrate: number;
+  /** 档位高低，越大越高 */
+  level: number;
+}
+
+/**
+ * 一场直播回放（当前只有斗鱼）。
+ *
+ * 斗鱼把一场直播按约 2 小时切成多段，后端已经拍平 —— 一条就是一段可播的视频。
+ */
+export interface Replay {
+  /** 播放用 ID：`https://v.douyu.com/show/<hash_id>` */
+  hash_id: string;
+  title: string;
+  cover: string;
+  /** 时长文案，斗鱼给的是 "120:05"（分:秒） */
+  duration: string;
+  /** 场次时间，如 "2026-10-08 13点场" */
+  time: string;
+  view_num: string;
+  /** 该段视频的起始 Unix 秒（弹幕/看点的绝对时间戳要减掉它） */
+  start_time?: number;
+  /** 整场被切成几段 */
+  parts?: number;
+}
+
+/** 一条历史弹幕（回放） */
+export interface ReplayDanmaku {
+  /** 视频内秒数 */
+  time: number;
+  text: string;
+  color: string;
+  user: string;
+}
+
+/** 一条 AI 看点（回放） */
+export interface ReplayHighlight {
+  time: number;
+  title: string;
+  desc: string;
 }
 
 export interface RoomDetail extends Room {
@@ -56,6 +119,59 @@ export const searchRooms = (platform: string, keyword: string, page = 1) =>
 
 export const getRoom = (platform: string, roomId: string) =>
   invoke<RoomDetail>("get_room", { platform, roomId });
+
+/**
+ * 主播的历史回放（一页 20 场 —— 斗鱼服务端把 limit 锁死在 20，
+ * 传 100 也只回 20）。`total` 是总场次，动辄几千（实测 2237 场），
+ * 所以前端要翻页 + 「加载更多」，不能只取固定条数。
+ */
+export interface ReplayPage {
+  list: Replay[];
+  total: number;
+}
+
+export const getReplays = (platform: string, roomId: string, page = 1) =>
+  invoke<ReplayPage>("get_replays", { platform, roomId, page });
+
+/**
+ * 解析回放的真实播放地址（带签名的 m3u8，已包成本地代理地址）。
+ *
+ * 慢（要开一个隐藏窗口让官方页面自己算签名），但**结果会缓存** ——
+ * 斗鱼那个签名不过期，同一个视频只解析一次。
+ */
+export const resolveReplay = (hashId: string) =>
+  invoke<PlayUrl>("resolve_replay", { hashId });
+
+/**
+ * 一场回放的完整分段（斗鱼把一场直播切成若干 2 小时的段）。
+ *
+ * `showStart` 是整场的起始 Unix 秒 —— 分段接口不给每段起点，
+ * 后端靠它 + 各段时长累加推出来（AI 看点要按段过滤，必须知道段起点）。
+ */
+export const getReplayParts = (
+  platform: string,
+  roomId: string,
+  hashId: string,
+  showStart = 0,
+) => invoke<Replay[]>("get_replay_parts", { platform, roomId, hashId, showStart });
+
+/** 一场回放的历史弹幕 */
+export const getReplayDanmaku = (platform: string, hashId: string, startTime = 0) =>
+  invoke<ReplayDanmaku[]>("get_replay_danmaku", { platform, hashId, startTime });
+
+/**
+ * 一场回放的 AI 看点（拿不到就是空数组）。
+ *
+ * **`startTime` / `duration` 传的是「这一段」的**：看点接口给的是整场的
+ * （实测跨 11 小时），而一段只有 2 小时。传了这两个值，后端只返回落在
+ * 这一段里的看点，并把时间换算成段内进度；不传则按整场算。
+ */
+export const getReplayHighlights = (
+  platform: string,
+  hashId: string,
+  startTime = 0,
+  duration = 0,
+) => invoke<ReplayHighlight[]>("get_replay_highlights", { platform, hashId, startTime, duration });
 
 export const getProxySetting = () => invoke<string | null>("get_proxy_setting");
 

@@ -118,8 +118,12 @@ fn parse_categories(v: &Value) -> Vec<Category> {
         if id.is_empty() || name.is_empty() {
             continue;
         }
+        // ID 里带上节点的 `type`：请求房间列表时必须原样回传 partition_type，
+        // 否则类型对不上，接口会返回完全不相干的内容
+        // （顶级节点 type=4，传成 1 时「游戏」返回的是卖黄金的直播间）。
+        let ty = p["type"].as_i64().unwrap_or(1);
         out.push(Category {
-            id: id.to_string(),
+            id: format!("{ty}_{id}"),
             name: name.to_string(),
             children: parse_categories(&item["sub_partition"]),
         });
@@ -173,10 +177,17 @@ pub async fn rooms(category: &str, page: u32) -> Result<RoomList, String> {
         .send()
         .await;
 
+    // category 形如 "4_103"（type_id，由 categories() 产出）；
+    // 兼容不带 type 的旧写法，此时按 type=1 处理。
+    let (ptype, pid) = match category.split_once('_') {
+        Some((t, rest)) if t.chars().all(|c| c.is_ascii_digit()) => (t.to_string(), rest.to_string()),
+        _ => ("1".to_string(), category.to_string()),
+    };
+
     let offset = (page.saturating_sub(1)) * 15;
     let ms = gen_ms_token(107);
     let q = format!(
-        "aid=6383&app_name=douyin_web&live_id=1&device_platform=web&language=zh-CN&enter_from=web_homepage_hot&cookie_enabled=true&screen_width=1920&screen_height=1080&browser_language=zh-CN&browser_platform=Win32&browser_name=Chrome&browser_version=131.0.0.0&count=15&offset={offset}&partition={category}&partition_type=1&req_from=2&msToken={ms}"
+        "aid=6383&app_name=douyin_web&live_id=1&device_platform=web&language=zh-CN&enter_from=web_homepage_hot&cookie_enabled=true&screen_width=1920&screen_height=1080&browser_language=zh-CN&browser_platform=Win32&browser_name=Chrome&browser_version=131.0.0.0&count=15&offset={offset}&partition={pid}&partition_type={ptype}&req_from=2&msToken={ms}"
     );
     // 房间列表接口必须带 a_bogus 签名，缺了直接 Access Denied
     let sign = super::douyin_a_bogus::generate_a_bogus(&q, net::UA);
@@ -308,7 +319,8 @@ pub async fn room_detail(room_id: &str) -> Result<RoomDetail, String> {
             .and_then(|s| s.as_str())
             .unwrap_or("")
             .to_string(),
-    };
+            replay: false,
+        };
 
     let mut plays = Vec::new();
     if live {
@@ -353,6 +365,7 @@ pub async fn room_detail(room_id: &str) -> Result<RoomDetail, String> {
                 url: u,
                 format: format.into(),
                 quality: k.to_string(),
+                qualities: vec![],
             });
             if plays.len() >= 3 {
                 break;
@@ -413,6 +426,7 @@ fn parse_room(r: &Value) -> Room {
             .and_then(|s| s.as_str())
             .unwrap_or("")
             .to_string(),
+        replay: false,
     }
 }
 

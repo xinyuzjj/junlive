@@ -70,6 +70,7 @@ html.dark {
   --bg-3: #232833;
   --bg-4: #2b3140;
 
+  --warn: #ffb020;
   --danger: #ff5c5c;
   --shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
   --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.4);

@@ -48,6 +48,288 @@ async fn get_room(platform: String, room_id: String) -> Result<RoomDetail, Strin
     platforms::room_detail(&platform, &room_id).await
 }
 
+/// 把回放 m3u8 包成前端能直接播的 `PlayUrl`。
+///
+/// 走本地代理的理由跟直播一样：分片带防盗链参数，直连会被拦；
+/// 代理还会把 m3u8 里的分片地址逐行换成本地地址（hls.js 才能续着拉）。
+fn mk_replay_play(m3u8: &str, qualities: Vec<ReplayQuality>) -> PlayUrl {
+    let name = qualities
+        .iter()
+        .find(|q| q.url == m3u8)
+        .map(|q| q.name.clone())
+        .unwrap_or_else(|| "回放".to_string());
+    PlayUrl {
+        url: m3u8.to_string(),
+        proxy: proxy::wrap(
+            m3u8,
+            vec![("Referer".to_string(), "https://v.douyu.com/".to_string())],
+            false,
+        ),
+        format: "hls".to_string(),
+        quality: name,
+        qualities,
+    }
+}
+
+/// 回放地址缓存：hash_id → 带签名的 m3u8。
+///
+/// **为什么能缓存**：斗鱼回放取流接口 `getStreamUrlWeb` 的签名只绑定
+/// `(vid, tt)` 而**不随时间过期** —— 实测把十分钟前抓到的请求原样重放，
+/// 依然返回正常结果（改 tt 或改 vid 才会「权限不足」）。所以解析一次就够。
+type ReplayCache = std::collections::HashMap<String, (String, Vec<ReplayQuality>)>;
+fn replay_cache() -> &'static std::sync::Mutex<ReplayCache> {
+    static C: std::sync::OnceLock<std::sync::Mutex<ReplayCache>> = std::sync::OnceLock::new();
+    C.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+/// 解析回放的播放地址（带签名的 m3u8）。
+///
+/// 为什么绕这么大一圈：斗鱼回放取流接口 `wgapi/vodnc/front/stream/getStreamUrlWeb`
+/// 要求签名（`v`+`did`+`tt`+`sign`+`vid`），不签名直接返回「权限不足」；
+/// 签名算法在混淆 JS 里且字符串是动态拼的，静态搜不出来。
+///
+/// 所以这里用「**让官方页面自己算**」的办法：
+///   1. 开一个隐藏 WebView 打开回放页（带 `ap=1`，页面会自动起播）
+///   2. 页面里的播放器拿到 m3u8 后会写进 `<video>.currentSrc`
+///   3. 注入脚本轮询这个值，拿到后跳到一个假域名把地址带出来
+///   4. 我们用 `on_navigation` 拦下这次跳转，读出地址，关掉窗口
+///
+/// 拿到之后就能用**我们自己的播放器**放了（走本地代理解决防盗链），
+/// 不再需要内嵌整个官方页面。
+#[tauri::command]
+async fn resolve_replay(app: tauri::AppHandle, hash_id: String) -> Result<PlayUrl, String> {
+    use std::sync::{Arc, Mutex};
+    use tauri::{WebviewUrl, WebviewWindowBuilder};
+
+    if let Some((u, qs)) = replay_cache().lock().unwrap().get(&hash_id) {
+        return Ok(mk_replay_play(u, qs.clone()));
+    }
+
+    let label = format!("vodprobe{}", hash_id.replace(|c: char| !c.is_alphanumeric(), ""));
+    // 每次解析前先清掉可能残留的同名窗口
+    if let Some(old) = tauri::Manager::get_webview_window(&app, &label) {
+        let _ = old.close();
+    }
+
+    let target: tauri::Url = format!("https://v.douyu.com/show/{hash_id}?ap=1")
+        .parse()
+        .map_err(|e| format!("URL 解析失败: {e}"))?;
+
+    let sink: Arc<Mutex<Option<tokio::sync::oneshot::Sender<String>>>> =
+        Arc::new(Mutex::new(None));
+    let (tx, rx) = tokio::sync::oneshot::channel::<String>();
+    *sink.lock().unwrap() = Some(tx);
+    let sink_nav = sink.clone();
+
+    // 注入脚本：把播放地址「带出去」。
+    //
+    // 为什么不能只看 <video>.currentSrc：斗鱼播放器走 MSE，
+    // currentSrc 是 `blob:` 地址，拿不到真实 m3u8。
+    //
+    // 主路是**钩 `getStreamUrlWeb` 的响应体** —— 它一次给全所有清晰度
+    // （标清480P / 高清720P / 1080P60 / 原画2K60），有了它用户才能切清晰度。
+    // 钩 m3u8 请求只是兜底（万一响应体结构变了），故意延后 250ms 发，
+    // 让响应体那条路先赢 —— 不然只能拿到一个地址、没有档位列表。
+    const PROBE_JS: &str = r#"
+(function () {
+  var done = false;
+  function report(payload) {
+    if (done) return;
+    done = true;
+    try {
+      location.href = 'https://junlive.local/vod?d=' +
+        encodeURIComponent(JSON.stringify(payload));
+    } catch (e) {}
+  }
+  function later(u) {
+    setTimeout(function () { report({ url: u, qualities: [] }); }, 250);
+  }
+  function hit(u) { return u && String(u).indexOf('.m3u8') >= 0; }
+
+  var oOpen = XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open = function (m, u) {
+    try {
+      this.__u = String(u);
+      if (hit(u)) later(String(u));
+    } catch (e) {}
+    return oOpen.apply(this, arguments);
+  };
+
+  var oSend = XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.send = function () {
+    var self = this;
+    try {
+      if (self.__u && self.__u.indexOf('getStreamUrlWeb') >= 0) {
+        self.addEventListener('load', function () {
+          try {
+            var j = JSON.parse(self.responseText);
+            var tv = j && j.data && j.data.thumb_video;
+            if (!tv) return;
+            var qs = [];
+            for (var k in tv) {
+              var q = tv[k];
+              if (q && q.url) {
+                qs.push({ id: k, name: q.name || k, url: q.url,
+                          bitrate: q.bit_rate || 0, level: q.level || 0 });
+              }
+            }
+            if (!qs.length) return;
+            qs.sort(function (a, b) { return (b.level || 0) - (a.level || 0); });
+            report({ url: qs[0].url, qualities: qs });
+          } catch (e) {}
+        });
+      }
+    } catch (e) {}
+    return oSend.apply(this, arguments);
+  };
+
+  var oFetch = window.fetch;
+  if (oFetch) {
+    window.fetch = function (input) {
+      try {
+        var u = (typeof input === 'string') ? input : (input && input.url);
+        if (hit(u)) later(String(u));
+      } catch (e) {}
+      return oFetch.apply(this, arguments);
+    };
+  }
+
+  // 兜底：页面已经在加载途中（钩子装晚了）时，从 resource timing 里翻
+  var n = 0;
+  var t = setInterval(function () {
+    n++;
+    var list = performance.getEntriesByType('resource');
+    for (var i = 0; i < list.length; i++) {
+      if (hit(list[i].name)) { clearInterval(t); later(list[i].name); return; }
+    }
+    var v = document.querySelector('video');
+    var s = v && (v.currentSrc || v.src);
+    if (hit(s)) { clearInterval(t); later(s); return; }
+    if (n > 120) clearInterval(t);
+  }, 500);
+})();
+"#;
+
+    let w = WebviewWindowBuilder::new(&app, &label, WebviewUrl::External(target))
+        .title("正在解析回放地址…")
+        .visible(false)
+        .inner_size(1280.0, 800.0)
+        // initialization_script 在页面自己的脚本之前执行 —— 必须这么早，
+        // 否则播放器已经发完请求，XHR 钩子就白装了
+        .initialization_script(PROBE_JS)
+        .on_navigation(move |u| {
+            let s = u.as_str();
+            if let Some(rest) = s.strip_prefix("https://junlive.local/vod?d=") {
+                if let Some(tx) = sink_nav.lock().unwrap().take() {
+                    let _ = tx.send(rest.to_string());
+                }
+                return false; // 拦下这次跳转，只取参数
+            }
+            true
+        })
+        .build()
+        .map_err(|e| format!("打开解析窗口失败: {e}"))?;
+
+    let got = tokio::time::timeout(std::time::Duration::from_secs(35), rx).await;
+    let _ = w.close();
+
+    match got {
+        Ok(Ok(raw)) => {
+            let json = urlencoding::decode(&raw)
+                .map(|s| s.into_owned())
+                .unwrap_or(raw);
+            let v: serde_json::Value =
+                serde_json::from_str(&json).map_err(|e| format!("解析回放数据失败: {e}"))?;
+            let url = v["url"].as_str().unwrap_or("").to_string();
+            if url.is_empty() {
+                return Err("没能拿到回放地址".into());
+            }
+            // 每档都包一层本地代理，前端切清晰度时直接用 proxy
+            let mut qualities: Vec<ReplayQuality> = Vec::new();
+            if let Some(arr) = v["qualities"].as_array() {
+                for q in arr {
+                    let qu = q["url"].as_str().unwrap_or("");
+                    if qu.is_empty() {
+                        continue;
+                    }
+                    // 用户明确不要「原画2K60」（1440p60a）：码率跟 1080P60 几乎一样
+                    // （8171K vs 7975K）却更吃带宽，删掉少一个选项。
+                    if q["id"].as_str().unwrap_or("") == "1440p60a" {
+                        continue;
+                    }
+                    qualities.push(ReplayQuality {
+                        id: q["id"].as_str().unwrap_or("").to_string(),
+                        name: q["name"].as_str().unwrap_or("").to_string(),
+                        url: qu.to_string(),
+                        proxy: proxy::wrap(
+                            qu,
+                            vec![("Referer".to_string(), "https://v.douyu.com/".to_string())],
+                            false,
+                        ),
+                        bitrate: q["bitrate"].as_i64().unwrap_or(0),
+                        level: q["level"].as_i64().unwrap_or(0),
+                    });
+                }
+            }
+            replay_cache()
+                .lock()
+                .unwrap()
+                .insert(hash_id, (url.clone(), qualities.clone()));
+            Ok(mk_replay_play(&url, qualities))
+        }
+        Ok(Err(_)) => Err("解析窗口已关闭".into()),
+        Err(_) => Err("解析回放地址超时（斗鱼页面结构可能变了）".into()),
+    }
+}
+
+/// 一场回放的完整分段列表（斗鱼把一场直播切成若干 2 小时的段）。
+#[tauri::command]
+async fn get_replay_parts(
+    platform: String,
+    room_id: String,
+    hash_id: String,
+    show_start: Option<i64>,
+) -> Result<Vec<Replay>, String> {
+    platforms::replay_parts(&platform, &room_id, &hash_id, show_start.unwrap_or(0)).await
+}
+
+/// 一场回放的历史弹幕。
+#[tauri::command]
+async fn get_replay_danmaku(
+    platform: String,
+    hash_id: String,
+    start_time: Option<i64>,
+) -> Result<Vec<ReplayDanmaku>, String> {
+    platforms::replay_danmaku(&platform, &hash_id, start_time.unwrap_or(0)).await
+}
+
+/// 一场回放的 AI 看点（拿不到就空列表，前端不显示）。
+#[tauri::command]
+async fn get_replay_highlights(
+    platform: String,
+    hash_id: String,
+    start_time: Option<i64>,
+    duration: Option<i64>,
+) -> Result<Vec<ReplayHighlight>, String> {
+    platforms::replay_highlights(
+        &platform,
+        &hash_id,
+        start_time.unwrap_or(0),
+        duration.unwrap_or(0),
+    )
+    .await
+}
+
+/// 主播的直播回放列表（当前只有斗鱼）。
+#[tauri::command]
+async fn get_replays(
+    platform: String,
+    room_id: String,
+    page: Option<u32>,
+) -> Result<ReplayPage, String> {
+    platforms::replays(&platform, &room_id, page.unwrap_or(1)).await
+}
+
 /// 登记「续流上下文」：流地址到期后由本地代理自己重新解析，播放器无感。
 ///
 /// 为什么必须做：所有平台的流地址都带时效，**斗鱼固定 300 秒就被 CDN 主动 EOF**
@@ -238,6 +520,11 @@ pub fn run() {
             get_rooms,
             search_rooms,
             get_room,
+            get_replays,
+            get_replay_parts,
+            get_replay_danmaku,
+            get_replay_highlights,
+            resolve_replay,
             set_stream_renew,
             android_immersive,
             routing::needs_proxy,
@@ -302,7 +589,9 @@ pub fn cli_test(args: &[String]) {
                 match platforms::categories(&p).await {
                     Ok(cs) => {
                         println!("{} 个顶级分区", cs.len());
-                        for c in cs.iter().take(40) {
+                        // 可选显示条数：`categories <plat> [n]`（默认 40，排查时给大值）
+                        let lim: usize = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(40);
+                        for c in cs.iter().take(lim) {
                             if c.children.is_empty() {
                                 println!("  {:<12} {}", c.id, c.name);
                             } else {
@@ -342,6 +631,70 @@ pub fn cli_test(args: &[String]) {
                     Err(e) => println!("ERR {e}"),
                 }
             }
+            "rparts" => {
+                let p = args.get(1).cloned().unwrap_or_default();
+                let id = args.get(2).cloned().unwrap_or_default();
+                let h = args.get(3).cloned().unwrap_or_default();
+                let st: i64 = args.get(4).and_then(|s| s.parse().ok()).unwrap_or(0);
+                match platforms::replay_parts(&p, &id, &h, st).await {
+                    Ok(rs) => {
+                        println!("共 {} 段", rs.len());
+                        for r in rs.iter().take(10) {
+                            println!(
+                                "  [{}] {} start={} | {}",
+                                r.hash_id, r.duration, r.start_time, r.title
+                            );
+                        }
+                    }
+                    Err(e) => println!("ERR {e}"),
+                }
+            }
+            "rdanmaku" => {
+                let p = args.get(1).cloned().unwrap_or_default();
+                let h = args.get(2).cloned().unwrap_or_default();
+                let st: i64 = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(0);
+                match platforms::replay_danmaku(&p, &h, st).await {
+                    Ok(ms) => {
+                        println!("共 {} 条弹幕", ms.len());
+                        for m in ms.iter().take(8) {
+                            println!("  [{:>7.1}s] {} | {}", m.time, m.user, m.text);
+                        }
+                        if let Some(last) = ms.last() {
+                            println!("  最后一条在 {:.1}s", last.time);
+                        }
+                    }
+                    Err(e) => println!("ERR {e}"),
+                }
+            }
+            "rhl" => {
+                let p = args.get(1).cloned().unwrap_or_default();
+                let h = args.get(2).cloned().unwrap_or_default();
+                let st: i64 = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(0);
+                let du: i64 = args.get(4).and_then(|s| s.parse().ok()).unwrap_or(0);
+                match platforms::replay_highlights(&p, &h, st, du).await {
+                    Ok(hs) => {
+                        println!("共 {} 条看点（段起点 {st} 时长 {du}）", hs.len());
+                        for x in hs.iter().take(8) {
+                            println!("  [{:>7.1}s] {}", x.time, x.title);
+                        }
+                    }
+                    Err(e) => println!("ERR {e}"),
+                }
+            }
+            "replays" => {
+                let p = args.get(1).cloned().unwrap_or_default();
+                let id = args.get(2).cloned().unwrap_or_default();
+                let pg: u32 = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(1);
+                match platforms::replays(&p, &id, pg).await {
+                    Ok(rs) => {
+                        println!("本页 {} 条 / 共 {} 场", rs.list.len(), rs.total);
+                        for r in rs.list.iter().take(12) {
+                            println!("  [{}] {} | {} | {}", r.hash_id, r.time, r.duration, r.title);
+                        }
+                    }
+                    Err(e) => println!("ERR {e}"),
+                }
+            }
             "room" => {
                 let p = args.get(1).cloned().unwrap_or_default();
                 let id = args.get(2).cloned().unwrap_or_default();
@@ -349,7 +702,13 @@ pub fn cli_test(args: &[String]) {
                     Ok(d) => {
                         println!("平台={} 房间={} 主播={}", d.room.platform, d.room.room_id, d.room.streamer);
                         println!("标题={}", d.room.title);
-                        println!("开播={} 人气={} 分区={}", d.room.live, d.room.online, d.room.area);
+                        println!(
+                            "开播={} 录播={} 人气={} 分区={}",
+                            d.room.live,
+                            d.room.replay,
+                            d.room.online,
+                            d.room.area
+                        );
                         println!("播放地址 {} 条", d.plays.len());
                         for pl in &d.plays {
                             let u: String = pl.url.chars().take(130).collect();
