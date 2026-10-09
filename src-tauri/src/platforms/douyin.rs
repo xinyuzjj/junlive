@@ -7,6 +7,7 @@ use crate::model::*;
 use crate::net;
 use crate::proxy;
 use serde_json::Value;
+use std::sync::OnceLock;
 
 fn hdr(rid: &str) -> Vec<(String, String)> {
     vec![
@@ -160,7 +161,17 @@ fn pct(s: &str) -> String {
     out
 }
 
-/// 随机 msToken（107 位，和浏览器里的一致）
+/// msToken（107 位，和浏览器里的一致）。
+///
+/// **整个进程只生成一次，之后所有请求复用同一个值。**
+///
+/// 踩过的坑：以前是每次请求都 `gen_ms_token(107)` 随机一个新的，
+/// 结果抖音把每次请求都当成**新会话**，于是 `offset` 被无视 ——
+/// page=1 和 page=2 返回**完全一样的 15 条**（实测 dupCount=15/15）。
+/// 用户看到的就是「只有 15 个、点加载更多全是重复」。
+///
+/// 对照实验：不带 msToken 的请求 offset 完全正常（6 页 90 个不重复房间），
+/// 带随机 msToken 的请求分页失效。所以问题就出在「每页换 token」上。
 fn gen_ms_token(n: usize) -> String {
     use rand::Rng;
     const CH: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -168,14 +179,41 @@ fn gen_ms_token(n: usize) -> String {
     (0..n).map(|_| CH[rng.gen_range(0..CH.len())] as char).collect()
 }
 
+/// msToken —— **整个进程只生成一次，之后所有请求复用同一个值。**
+///
+/// 踩过的坑：以前是每次请求都随机一个新 msToken，结果抖音把每次请求
+/// 都当成**新会话**，于是 `offset` 被无视 —— page=1 和 page=2 返回
+/// **完全一样的 15 条**（实测 dupCount=15/15）。用户看到的就是
+/// 「只有 15 个、点加载更多全是重复」。
+///
+/// 对照实验：不带 msToken 的请求 offset 完全正常（6 页 90 个不重复房间），
+/// 带随机 msToken 的请求分页失效。所以问题就出在「每页换 token」上。
+static MS_TOKEN: OnceLock<String> = OnceLock::new();
+
+fn ms_token() -> String {
+    MS_TOKEN.get_or_init(|| gen_ms_token(107)).clone()
+}
+
 pub async fn rooms(category: &str, page: u32) -> Result<RoomList, String> {
-    let c = net::direct();
-    // 预热：拿 cookie
-    let _ = c
-        .get("https://live.douyin.com/")
-        .header("User-Agent", net::UA)
-        .send()
-        .await;
+    // **整个进程共用一个 client**（cookie / 会话必须连续）。
+    //
+    // 以前每次都 `net::direct()` 新建一个，等于每次请求都是全新会话 ——
+    // 这和 msToken 每页换新是同一类问题：抖音会因此放弃 offset 游标，
+    // 翻页返回同一批房间（实测 page=1 和 page=2 完全一样的 15 条）。
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    let c = CLIENT.get_or_init(net::direct);
+    let c = c.clone();
+
+    // 预热拿 cookie —— 每个进程只做一次，之后靠 client 自己保持。
+    static WARMED: OnceLock<()> = OnceLock::new();
+    if WARMED.get().is_none() {
+        let _ = c
+            .get("https://live.douyin.com/")
+            .header("User-Agent", net::UA)
+            .send()
+            .await;
+        let _ = WARMED.set(());
+    }
 
     // category 形如 "4_103"（type_id，由 categories() 产出）；
     // 兼容不带 type 的旧写法，此时按 type=1 处理。
@@ -185,7 +223,7 @@ pub async fn rooms(category: &str, page: u32) -> Result<RoomList, String> {
     };
 
     let offset = (page.saturating_sub(1)) * 15;
-    let ms = gen_ms_token(107);
+    let ms = ms_token();
     let q = format!(
         "aid=6383&app_name=douyin_web&live_id=1&device_platform=web&language=zh-CN&enter_from=web_homepage_hot&cookie_enabled=true&screen_width=1920&screen_height=1080&browser_language=zh-CN&browser_platform=Win32&browser_name=Chrome&browser_version=131.0.0.0&count=15&offset={offset}&partition={pid}&partition_type={ptype}&req_from=2&msToken={ms}"
     );
@@ -211,7 +249,14 @@ pub async fn rooms(category: &str, page: u32) -> Result<RoomList, String> {
             list.push(parse_room(r));
         }
     }
-    let has_more = !list.is_empty();
+    // 「还有没有下一页」按**返回条数**判，别只看列表空不空。
+    //
+    // 以前写的是 `!list.is_empty()`，而抖音每次都凑满 15 条，
+    // 导致 has_more 永远为 true —— 翻到最后一页前端还会继续请求，
+    // 拿回来一批重复的，再叠加 Home.vue 里那套「有一次重复就锁死」的逻辑，
+    // 表现就是「只有 15 个、滚到底没反应」。
+    // 实测：热门 6 页 × 15 = 90 个不重复房间，offset 是生效的。
+    let has_more = list.len() >= 15;
     Ok(RoomList {
         rooms: list,
         page,

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { avatarUrl } from "../api";
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   getCategories,
@@ -77,6 +77,8 @@ const loading = ref(false);
 const loadingMore = ref(false);
 /** 到底了：翻页翻不出新房间时置位（有些平台的 offset 被接口忽略）。 */
 const noMore = ref(false);
+/** 连续几页没翻出新的（见 more() 里的去重逻辑） */
+const emptyPages = ref(0);
 const error = ref("");
 const keyword = ref("");
 const isSearch = ref(false);
@@ -176,13 +178,26 @@ async function loadRooms(reset = true) {
     if (reset) {
       rooms.value = r.rooms;
       noMore.value = false;
+      emptyPages.value = 0;
     } else {
-      // 抖音的 offset 被接口忽略：翻页返回的是同一批房间，直接追加就是一堆重复。
-      // 这里按 room_id 去重；一条新的都没有就说明翻不动了，标记到底、把按钮收起来。
+      // 翻页去重：**连续两次**一条新的都没有才判「到底了」。
+      //
+      // 以前是「有一次没新数据就 noMore = true」，太脆了——
+      // 实测抖音 offset 是生效的（6 页 × 15 = 90 个不重复房间），
+      // 但偶尔某一页会撞上同一批推荐（接口有随机成分），
+      // 那一次误判会把 noMore 永久锁死，表现就是「只有 15 个、滚到底没反应」。
+      // 改成连续两次空才认输，单次抖动会自己恢复。
       const seen = new Set(rooms.value.map((x) => x.room_id));
       const fresh = r.rooms.filter((x) => !seen.has(x.room_id));
       rooms.value = [...rooms.value, ...fresh];
-      if (!fresh.length) noMore.value = true;
+      if (!fresh.length) {
+        emptyPages.value += 1;
+        if (emptyPages.value >= 2) noMore.value = true;
+      } else {
+        emptyPages.value = 0;
+      }
+      // 后端说没更多了，也认
+      if (!r.has_more) noMore.value = true;
     }
     error.value = rooms.value.length ? "" : `${store.platformName(store.current)} 暂时没有返回数据`;
   } catch (e) {
@@ -190,6 +205,8 @@ async function loadRooms(reset = true) {
   } finally {
     loading.value = false;
   }
+  // 内容没撑满容器时滚动事件不会来，得主动补页（见 fillIfNotOverflowing）
+  void fillIfNotOverflowing();
 }
 
 async function more() {
@@ -212,6 +229,36 @@ function onGridScroll(e: Event) {
   const el = e.currentTarget as HTMLElement;
   // 提前 240px 触发，滚动手感上不会「撞到底才转圈」
   if (el.scrollTop + el.clientHeight >= el.scrollHeight - 240) void more();
+}
+
+/**
+ * 「第一页没填满也要继续翻」—— 这个是用户反馈「只能显示 15 个」的根因。
+ *
+ * 滚动加载有个前提：内容必须**撑得比容器高**，才有 scroll 事件可触发。
+ * 但抖音一页只给 15 个，某些分区（尤其三级分类）15 个卡片根本填不满
+ * 一屏，scrollHeight === clientHeight，滚动事件永远不来，
+ * 于是就永远停在第一页 —— 看着像「接口只给了 15 个」。
+ *
+ * 所以每次加载完，如果内容还没溢出，就主动再要一页，直到填满或真的没了。
+ * 最多连补 5 页，防止某个分区只有零星几个房间时无限请求。
+ */
+async function fillIfNotOverflowing() {
+  if (isSearch.value) return;
+  for (let i = 0; i < 5; i++) {
+    if (noMore.value || loading.value || loadingMore.value) return;
+    await nextTick();
+    const el = document.querySelector<HTMLElement>(".grid-wrap");
+    if (!el) return;
+    // 判据用「能不能滚」，不能用「超出多少像素」：
+    // 一屏 527px 装 15 个卡片只超出 22px，按像素阈值会误判成「填满了」，
+    // 结果第一页之后就不动了。只要内容还没真正溢出就继续要。
+    const overflowing = el.scrollHeight > el.clientHeight + 1;
+    // 就算溢出了，卡片太少也照样补 —— 抖音一页 15 个，
+    // 用户要的是「能一直往下翻找主播」，不该停在两三个。
+    const enough = rooms.value.length >= 45;
+    if (overflowing && enough) return;
+    await more();
+  }
 }
 
 function refresh() {
