@@ -1,6 +1,6 @@
 [package]
 name = "junlive"
-version = "1.2.7"
+version = "1.2.8"
 license = "MIT"
 description = "JunLive —— 多平台直播聚合桌面客户端（斗鱼/虎牙/B站/抖音/YouTube/SOOP/Twitch）"
 authors = ["xinyuzjj"]
@@ -21,6 +21,11 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
+# 自动更新：检查 GitHub Releases 上的 latest.json，验签后下载安装
+tauri-plugin-updater = "2"
+# 更新包下载完需要重启应用才能生效（Windows 的安装器会自己重启，
+# Linux/AppImage 需要手动 restart）
+tauri-plugin-process = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

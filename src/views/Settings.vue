@@ -6,11 +6,13 @@
  * 之前这里有三张纯展示的卡片（本地流代理端口、支持平台表、致谢说明），
  * 既不可操作也不影响任何行为，已删除。
  *
- * 现在四组：
+ * 现在六组：
  *   1. 代理        —— 海外平台（YouTube / Twitch / SOOP）走这里
  *   2. 弹幕        —— 全局默认，改完立刻生效（和播放器里的「弹」按钮同一份数据）
  *   3. 账号 Cookie —— YouTube（含一键登录）、B站（弹幕风控用）
  *   4. 数据管理    —— 清空关注 / 清空 Cookie
+ *   5. 关于        —— 版本号 / 项目链接
+ *   6. 软件更新    —— 检查 / 下载 / 重启生效
  */
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
@@ -25,6 +27,16 @@ import {
 } from "../api";
 import { store } from "../store";
 import { soopMode } from "../soopMode";
+import {
+  checkUpdate,
+  downloadUpdate,
+  restartApp,
+  updateError,
+  updateNotes,
+  updateProgress,
+  updateState,
+  newVersion,
+} from "../updater";
 import {
   DM_COLOR_MODES,
   dmArea,
@@ -340,6 +352,70 @@ async function clearCookies() {
         <button @click="router.push('/about')">项目介绍 / GitHub</button>
       </div>
     </section>
+
+    <!-- 6. 软件更新 -->
+    <section class="card">
+      <div class="card-title">软件更新</div>
+
+      <!-- 待下载 -->
+      <template v-if="updateState === 'available'">
+        <p class="hint">
+          发现新版本 <b>v{{ newVersion }}</b>
+          <span v-if="VERSION === newVersion">（当前已是此版本）</span>
+        </p>
+        <div v-if="updateNotes" class="notes">{{ updateNotes }}</div>
+        <div class="row">
+          <button class="primary" @click="downloadUpdate">下载更新</button>
+          <button @click="checkUpdate(false)">重新检查</button>
+        </div>
+      </template>
+
+      <!-- 下载中 -->
+      <template v-else-if="updateState === 'downloading'">
+        <p class="hint">正在下载 v{{ newVersion }}…（下载完会提示重启，不影响当前观看）</p>
+        <div class="bar"><i :style="{ width: updateProgress + '%' }"></i></div>
+      </template>
+
+      <!-- 已下载，等重启 -->
+      <template v-else-if="updateState === 'ready'">
+        <p class="hint">v{{ newVersion }} 已下载完成，重启后生效。</p>
+        <div class="row">
+          <button class="primary" @click="restartApp">立即重启</button>
+          <button @click="updateState = 'available'">稍后</button>
+        </div>
+      </template>
+
+      <!-- 检查中 -->
+      <template v-else-if="updateState === 'checking'">
+        <p class="hint">正在检查更新…</p>
+      </template>
+
+      <!-- 已是最新 -->
+      <template v-else-if="updateState === 'latest'">
+        <p class="hint">已是最新版本（v{{ VERSION }}）。</p>
+        <div class="row">
+          <button @click="checkUpdate(false)">重新检查</button>
+        </div>
+      </template>
+
+      <!-- 出错 -->
+      <template v-else-if="updateState === 'error'">
+        <p class="hint err-text">检查更新失败：{{ updateError }}</p>
+        <div class="row">
+          <button @click="checkUpdate(false)">重试</button>
+        </div>
+      </template>
+
+      <!-- 初始 -->
+      <template v-else>
+        <p class="hint">
+          应用会自动检查新版本，下载完成后由你决定何时重启。
+        </p>
+        <div class="row">
+          <button @click="checkUpdate(false)">检查更新</button>
+        </div>
+      </template>
+    </section>
   </div>
 </template>
 
@@ -408,6 +484,37 @@ h2 {
   padding: 1px 5px;
   font-family: Consolas, monospace;
   font-size: 11.5px;
+}
+
+/* 软件更新 */
+.err-text {
+  color: var(--danger);
+}
+/* 更新说明：等宽可滚，版本说明长了不至于把卡片撑爆 */
+.notes {
+  background: var(--chip);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--fg-dim);
+  white-space: pre-wrap;
+  max-height: 160px;
+  overflow: auto;
+}
+/* 下载进度条 */
+.bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--chip);
+  overflow: hidden;
+}
+.bar i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s;
 }
 
 /* 弹幕 */

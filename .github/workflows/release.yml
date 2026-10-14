@@ -78,6 +78,11 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 自动更新的签名密钥。tauri-action 用它给安装包签名，
+          # 并生成 latest.json（客户端拿它比对版本 + 验签）。
+          # 私钥只存在 GitHub Secrets 里，仓库中没有。
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || 'v0.1.0' }}
           releaseName: "JunLive ${{ github.ref_type == 'tag' && github.ref_name || 'v0.1.0' }}"
@@ -192,3 +197,24 @@ jobs:
           ls -la "JunLive-${TAG}-android-arm64.apk"
           gh release upload "$TAG" "JunLive-${TAG}-android-arm64.apk" --clobber
           gh release view "$TAG" --json assets -q '.assets[].name'
+
+      # 用仓库里的发布说明覆盖 tauri-action 写死的通用文案。
+      #
+      # 为什么放在这里：tauri-action 的 releaseBody 是写死在 workflow 里的，
+      # 会在**创建 Release 时**写入。而发布说明应该跟着版本走、
+      # 用 docs/release-notes-<tag>.md（和代码一起 review），
+      # 所以建完之后再覆盖一次。
+      #
+      # 找不到对应文件就跳过 —— 不阻断发版。
+      - name: 套用版本发布说明
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.ref_type == 'tag' && github.ref_name || 'v1.0.1' }}"
+          NOTES="docs/release-notes-${TAG}.md"
+          if [ -f "$NOTES" ]; then
+            echo "用 $NOTES 覆盖 Release 说明"
+            gh release edit "$TAG" --notes-file "$NOTES"
+          else
+            echo "::warning::$NOTES 不存在，保留默认说明"
+          fi

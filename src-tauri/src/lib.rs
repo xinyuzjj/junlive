@@ -507,6 +507,10 @@ pub mod routing {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        // 自动更新：前端通过 @tauri-apps/plugin-updater 检查 / 下载 / 安装
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        // 更新装完要重启进程才生效
+        .plugin(tauri_plugin_process::init())
         .setup(|_app| {
             // 启动本地流代理
             tauri::async_runtime::spawn(async {

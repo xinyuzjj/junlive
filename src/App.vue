@@ -4,6 +4,7 @@ import { useRouter } from "vue-router";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listPlatforms, parseInput } from "./api";
 import { store } from "./store";
+import { scheduleStartupCheck } from "./updater";
 import MobileShell from "./mobile/Shell.vue";
 
 const router = useRouter();
@@ -110,6 +111,9 @@ onMounted(async () => {
   } catch (e) {
     console.error(e);
   }
+  // 启动后延迟静默检查更新：有新版只在设置页显示，不打断观看。
+  // 失败完全不出声（没网 / GitHub 不通时用户不需要知道）。
+  scheduleStartupCheck();
 });
 
 watch(() => store.current, applyBrand);
