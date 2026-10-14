@@ -197,11 +197,26 @@ fn ms_token() -> String {
 pub async fn rooms(category: &str, page: u32) -> Result<RoomList, String> {
     // **整个进程共用一个 client**（cookie / 会话必须连续）。
     //
-    // 以前每次都 `net::direct()` 新建一个，等于每次请求都是全新会话 ——
+    // 以前每次都 `net::direct()` 新建一个，等于每次请求都是全新会话——
     // 这和 msToken 每页换新是同一类问题：抖音会因此放弃 offset 游标，
     // 翻页返回同一批房间（实测 page=1 和 page=2 完全一样的 15 条）。
+    //
+    // `net::direct()` 带 `cookie_store(true)`，只有共享同一个 client
+    // 才留得住预热时拿到的 cookie，所以必须缓存、不能每次新建。
+    //
+    // 超时比 `net::direct()` 的 20 秒放宽到 30 秒：抖音分区接口偶尔很慢，
+    // 20 秒容易在网络稍差时直接超时，用户看到的是「加载失败」而不是慢一点。
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    let c = CLIENT.get_or_init(net::direct);
+    let c = CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .danger_accept_invalid_certs(true)
+            .cookie_store(true)
+            .user_agent(net::UA)
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new())
+    });
     let c = c.clone();
 
     // 预热拿 cookie —— 每个进程只做一次，之后靠 client 自己保持。

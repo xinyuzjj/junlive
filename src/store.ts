@@ -67,14 +67,61 @@ function loadTheme(): ThemeMode {
 }
 
 const FOLLOW_KEY = "junlive.follows";
+/**
+ * 原始数据备份键 —— 只在「读失败」时写。
+ *
+ * 为什么需要：localStorage 里的数据一旦解析失败，`loadFollows()` 返回空数组，
+ * 用户之后随便做一次写操作（加关注/刷新状态）就会 `setItem(FOLLOW_KEY, "[]")`
+ * **把原始内容永久覆盖掉**，之后谁都救不回来。
+ * （WebView2 的 localStorage 在清缓存时同样会丢——这个坑已经实际踩过一次。）
+ *
+ * 所以读失败时先把原始字符串挪到备份键，后续写入不动它；
+ * 等用户下次能正常读出来（或者手动恢复）再说。
+ */
+const FOLLOW_BACKUP_KEY = "junlive.follows.unreadable";
 
 function loadFollows(): FollowItem[] {
+  const raw = localStorage.getItem(FOLLOW_KEY);
+  if (!raw) return [];
   try {
-    const raw = localStorage.getItem(FOLLOW_KEY);
-    return raw ? (JSON.parse(raw) as FollowItem[]) : [];
+    return JSON.parse(raw) as FollowItem[];
   } catch {
+    // 解析失败：**绝不能丢掉原始数据**。
+    // 存一份到备份键（只在没备份过时存，避免反复覆盖掉唯一一份能读的副本），
+    // 然后返回空数组让界面正常显示「还没有关注」。
+    if (!localStorage.getItem(FOLLOW_BACKUP_KEY)) {
+      try {
+        localStorage.setItem(FOLLOW_BACKUP_KEY, raw);
+        console.warn(
+          "[junlive] 关注列表解析失败，已把原始数据备份到 " +
+            FOLLOW_BACKUP_KEY +
+            "，请勿清除浏览器数据",
+        );
+      } catch {
+        /* 存不下就算了，至少别覆盖原数据 */
+      }
+    }
     return [];
   }
+}
+
+/**
+ * 写关注列表。
+ *
+ * 除了「清空关注」那一次（用户主动点的），其余写入都在这里做一层保护：
+ * 如果之前解析失败过、主键里躺着一份读不出来的原始数据，
+ * 就**不要**用内存里的（可能是空的）列表去覆盖它 ——
+ * 那样等于把仅存的那份原始数据彻底销毁。
+ * 这种情况下只更新备份键，主键原样留着，等用户/我们能恢复时再用。
+ */
+function saveFollows(list: FollowItem[], opts?: { force?: boolean }) {
+  const json = JSON.stringify(list);
+  if (!opts?.force && localStorage.getItem(FOLLOW_BACKUP_KEY)) {
+    // 上次读失败过 —— 主键里那份（虽然读不出来）比内存里的更值得保留
+    localStorage.setItem(FOLLOW_BACKUP_KEY, json);
+    return;
+  }
+  localStorage.setItem(FOLLOW_KEY, json);
 }
 
 export const store = reactive({
@@ -167,7 +214,7 @@ export const store = reactive({
         live: "UNKNOWN",
       });
     }
-    localStorage.setItem(FOLLOW_KEY, JSON.stringify(this.follows));
+    saveFollows(this.follows);
   },
 
   /**
@@ -189,13 +236,13 @@ export const store = reactive({
     if (f.live === live && !!f.replay === !!replay) return;
     f.live = live;
     f.replay = replay;
-    localStorage.setItem(FOLLOW_KEY, JSON.stringify(this.follows));
+    saveFollows(this.follows);
   },
 
   /** 清空关注列表（设置页的「数据管理」用） */
   clearFollows() {
     this.follows.splice(0, this.follows.length);
-    localStorage.setItem(FOLLOW_KEY, "[]");
+    saveFollows([], { force: true });
   },
 
   /** 顺带更新头像/昵称（关注时可能是空的，或平台换了头像） */
@@ -213,7 +260,7 @@ export const store = reactive({
       f.streamer = streamer;
       changed = true;
     }
-    if (changed) localStorage.setItem(FOLLOW_KEY, JSON.stringify(this.follows));
+    if (changed) saveFollows(this.follows);
   },
 
   platformName(id: string) {
