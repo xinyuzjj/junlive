@@ -548,54 +548,28 @@ pub async fn room_detail(room_id: &str) -> Result<RoomDetail, String> {
     if r.is_null() {
         return Err("房间不存在".into());
     }
-    // 假开播：不返回 Err，而是**正常返回房间、但 live = false**。
-    //
-    // 为什么这样：前端 `getRoom` 抛错时 catch 分支只填 error，
-    // `detail.value` 还是 null —— 房间标题、封面、**回放按钮**全都拿不到，
-    // 而假开播房恰恰最需要引导用户去点「回放」。
-    // 返回 live=false 则前端走「该主播当前未开播」，
-    // 同时房间信息齐全、回放入口在位。
-    let mut live = r["show_status"].as_i64().unwrap_or(0) == 1;
+    let live = r["show_status"].as_i64().unwrap_or(0) == 1;
 
-    // 「假开播」识别 —— 用户反馈「PC端少数房间卡在缓冲，安卓正常」。
+    // 【曾在这里加过「假开播」判断，已撤掉—— 依据不成立】
     //
-    // 实测根因：某些房间（赛事预告、长期挂着的官方号）**show_status 一直是 1**，
-    // 但根本没有真实推流。表现是：
-    //   - video: readyState=1 (HAVE_METADATA)、buffered.length=0、currentTime 永不前进
-    //   - 后端日志里连一次代理请求都没有 —— mpegts.js 根本没拿到媒体数据
-    //   - 页面显示「缓冲中…」，延迟读数是 "?"（bufEnd 拿不到）
-    // 安卓能播是因为它带的播放器内核对这个空流更宽容。
+    // 当时的做法：用 `show_time`（上次开播时间）超过 24 小时就判成未开播。
+    // 依据是「真开播都是几小时内（实测 2.9~6 小时），假开播 30~148 小时」。
     //
-    // 判断依据：`show_time`（本次开播时间）。
-    // 假开播的 show_time 是几天/几周前（赛事预告占着「直播中」状态），
-    // 真开播是几小时内。实测：
-    //   假开播 288016 → 148 小时前     假开播 2311698 → 30 小时前
-    //   真开播 475252 →   6 小时前     真开播 12306   → 2.9 小时前
-    // 注意 `end_time` 全都是 400 天以后（无意义），不能用来判断。
+    // **这个判断是错的。** 很多主播是**固定时段开播**，
+    // `show_time` 记的是上一次开播，所以"距今很久"只意味着**还没到今天的时段**，
+    // 不代表没在播。实测被误判的例子：
+    //   56040show_details="直播时间更新啦:晚上7点~12点"  show_time 3795 小时前 → 被判死，其实在播
+    //   226037  show_details="开播时间晚上12点-早上9点！" show_time12.8 小时前
+    //   844947  39.4 小时 / 12899100  88.6 小时 / 249813  530 小时 —— 全是误判
     //
-    // 为什么不在列表里过滤：mixList 接口**根本没有 show_time 字段**，
-    // 实测它返回的所有字段里没有任何一个能区分真假开播
-    // （288016 和 475252 的 dot/edot/rt/iv 等完全一致）。
-    // 只能在点进房间时用 betard 判断，代价是点进去才知道。
-    let show_time = r["show_time"].as_i64().unwrap_or(0);
-    let stale_hours = if show_time > 0 {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs() as i64)
-            .unwrap_or(0);
-        (now - show_time) / 3600
-    } else {
-        0
-    };
-    // 24 小时：真开播都是几小时内（实测 2.9~6 小时），
-    // 假开播实测 30~148 小时，阈值放中间很安全。
-    const STALE_HOURS_LIMIT: i64 = 24;
-    if live && stale_hours > STALE_HOURS_LIMIT {
-        eprintln!(
-            "[douyu] 房间 {room_id} 假开播：show_status=1 但 show_time 已是 {stale_hours} 小时前（阈值 {STALE_HOURS_LIMIT}），按未开播处理"
-        );
-        live = false;
-    }
+    // 为什么没法在数据层可靠区分：假开播（赛事预告 288016）和
+    // 这些真开播房间，betard 返回的**所有字段完全一致**
+    // （show_status/status/videoLoop/show_time/end_time 逐个比对无差别），
+    // mixList 更是根本没有show_time。
+    //
+    // 结论：宁可让用户自己点进去看一眼，也不要在列表里把在播的主播判死。
+    // 真遇到无推流的房间，播放器会显示「缓冲中」——这是准确描述，
+    // 比错误地告诉他「主播未开播」要好。
 
     let room = Room {
         platform: "douyu".into(),
