@@ -218,3 +218,30 @@ jobs:
           else
             echo "::warning::$NOTES 不存在，保留默认说明"
           fi
+
+      # 把发布说明同步进 latest.json 的 notes 字段。
+      #
+      # 为什么需要：latest.json 是 tauri-action 在**构建时**生成的，
+      # 那时它只能拿到 workflow 里写死的 releaseBody（通用文案），
+      # 所以应用内「更新说明」会显示一段没用的通用介绍。
+      # 客户端读的就是 latest.json 的 notes，不是 Release 页面，
+      # 所以必须改这份文件。
+      #
+      # latest.json 本身不参与签名校验（签名是逐个安装包签的），
+      # 所以改它的 notes 是安全的。
+      # continue-on-error：这只是锦上添花，失败不该拖垮发版。
+      - name: 同步发布说明进 latest.json
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.ref_type == 'tag' && github.ref_name || 'v1.0.1' }}"
+          NOTES="docs/release-notes-${TAG}.md"
+          if [ ! -f "$NOTES" ]; then echo "没有 $NOTES，跳过"; exit 0; fi
+          if ! gh release view "$TAG" --json assets -q '.assets[].name' | grep -qx 'latest.json'; then
+            echo "::warning::该 Release 没有 latest.json，跳过"; exit 0
+          fi
+          gh release download "$TAG" -p latest.json --clobber
+          jq --rawfile n "$NOTES" '.notes = $n' latest.json > latest.tmp && mv latest.tmp latest.json
+          gh release upload "$TAG" latest.json --clobber
+          echo "latest.json 的 notes 已更新（$(wc -c < latest.json) 字节）"

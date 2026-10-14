@@ -9,8 +9,9 @@
  * 纯浏览器环境（vite dev 直接开）没有插件，退回 window.open。
  */
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { onMounted } from "vue";
+import { appVersion, loadVersion } from "../version";
 
-const VERSION = "1.2.4";
 const REPO = "https://github.com/xinyuzjj/junlive";
 const RELEASES = `${REPO}/releases/latest`;
 const ISSUES = `${REPO}/issues`;
@@ -113,6 +114,10 @@ const CREDITS = [
       "关注列表的在线状态持久化做法（把 liveStatus 存进关注记录、进页面立刻排好序，而不是每次临时拉）、窗口全屏（CSS fullscreen 而不是 Fullscreen API）、以及抖音房间列表的 a_bogus 签名实现。",
   },
 ];
+
+onMounted(() => {
+  void loadVersion();
+});
 </script>
 
 <template>
@@ -160,7 +165,7 @@ const CREDITS = [
         <span class="mark">▶</span>
         <div>
           <h1>JunLive</h1>
-          <div class="ver">v{{ VERSION }} · 多平台直播聚合桌面客户端</div>
+          <div class="ver">v{{ appVersion }} · 多平台直播聚合桌面客户端</div>
         </div>
       </div>
       <p class="desc">

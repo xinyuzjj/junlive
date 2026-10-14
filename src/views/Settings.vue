@@ -37,6 +37,7 @@ import {
   updateState,
   newVersion,
 } from "../updater";
+import { appVersion, loadVersion } from "../version";
 import {
   DM_COLOR_MODES,
   dmArea,
@@ -48,8 +49,6 @@ import {
   dmSize,
   dmSpeed,
 } from "../dmSettings";
-
-const VERSION = "1.2.4";
 
 const router = useRouter();
 
@@ -108,6 +107,7 @@ const biliCookie = ref("");
 const biliMsg = ref("");
 
 onMounted(async () => {
+  void loadVersion();
   proxy.value = (await getProxySetting()) || "";
   ytCookie.value = (await getYoutubeCookie()) || "";
   biliCookie.value = (await getBilibiliCookie()) || "";
@@ -345,7 +345,7 @@ async function clearCookies() {
     <!-- 5. 关于 -->
     <section class="card about">
       <div>
-        <b>JunLive</b> v{{ VERSION }} · Tauri 2 + Vue 3 · 本地流代理 + 自建弹幕
+        <b>JunLive</b> v{{ appVersion }} · Tauri 2 + Vue 3 · 本地流代理 + 自建弹幕
       </div>
       <div class="dim">仅供个人学习交流，请遵守各平台的服务条款。</div>
       <div class="row" style="margin-top: 10px">
@@ -361,7 +361,7 @@ async function clearCookies() {
       <template v-if="updateState === 'available'">
         <p class="hint">
           发现新版本 <b>v{{ newVersion }}</b>
-          <span v-if="VERSION === newVersion">（当前已是此版本）</span>
+          <span v-if="appVersion === newVersion">（当前已是此版本）</span>
         </p>
         <div v-if="updateNotes" class="notes">{{ updateNotes }}</div>
         <div class="row">
@@ -392,7 +392,7 @@ async function clearCookies() {
 
       <!-- 已是最新 -->
       <template v-else-if="updateState === 'latest'">
-        <p class="hint">已是最新版本（v{{ VERSION }}）。</p>
+        <p class="hint">已是最新版本（v{{ appVersion }}）。</p>
         <div class="row">
           <button @click="checkUpdate(false)">重新检查</button>
         </div>
