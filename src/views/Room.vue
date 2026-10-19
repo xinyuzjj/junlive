@@ -277,6 +277,8 @@ async function playReplay(r: Replay) {
   curReplay.value = r;
   replayPlay.value = null;
   replayErr.value = "";
+  // 清掉直播残留的弹幕：面板和飞屏都只该显示这一场回放的
+  msgs.value = [];
   replayDms.value = [];
   replayHls.value = [];
   replayParts.value = [];
@@ -361,6 +363,8 @@ function backToReplayList() {
 function exitReplay() {
   curReplay.value = null;
   replayPlay.value = null;
+  // 回放弹幕清掉，回到直播从干净的列表开始
+  msgs.value = [];
   replayDms.value = [];
   replayHls.value = [];
   replayParts.value = [];
@@ -454,6 +458,10 @@ onMounted(async () => {
   // 跟 YouTube 官方 embed + 自建弹幕是同一个做法。
   try {
     unlisten = await listen<DanmakuMsg>("danmaku", (e) => {
+      // 看回放时只显示回放弹幕。
+      // 直播弹幕连接是一直挂着的（进房间时就 startDanmaku 了），
+      // 所以「看录播时直播刚好开播」会把直播弹幕混进回放画面。
+      if (curReplay.value) return;
       msgs.value.push(e.payload);
       if (msgs.value.length > 400) msgs.value.splice(0, 150);
       nextTick(scrollBottom);
