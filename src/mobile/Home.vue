@@ -184,7 +184,8 @@ watch(
         :style="p.id === store.current ? { color: p.color, borderColor: p.color } : {}"
         @click="onPlatform(p.id)"
       >
-        <span class="mh-plat-dot" :style="{ background: p.color }"></span>
+        <!-- 有平台没配 color 时兜底，否则圆点透明看不见，几个 tab 就长得不一样 -->
+        <span class="mh-plat-dot" :style="{ background: p.color || 'var(--fg-dim)' }"></span>
         {{ p.name }}
       </button>
       <span v-if="!store.platforms.length" class="mh-plats-empty">正在加载平台…</span>
@@ -368,7 +369,7 @@ watch(
   -webkit-overflow-scrolling: touch;
   /* 关掉浏览器/WebView 自带的整页下拉刷新，否则会和我们的手势打架 */
   overscroll-behavior-y: contain;
-  padding: 8px 8px 16px;
+  padding: 10px 12px 20px;
 }
 
 /* 下拉刷新提示条：默认被 height:0 压扁，靠内联 height 撑开 */
@@ -404,25 +405,33 @@ watch(
    170 保证 390px 宽下仍是 2 列、不会塌成 1 列。间距 8px（调研 B1）。 */
 .mh-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 10px;
 }
 .mh-card {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 5px;
   border: 0; /* 无边框无阴影：Simple Live 的卡片风格 */
   background: none;
   padding: 0;
   text-align: left;
   color: var(--fg);
+  transition: transform 0.12s ease, opacity 0.12s ease;
 }
-/* 封面：固定高 110、宽 100%、object-fit:cover（不是 16:9）—— 调研 B3 */
+/* 手机上必须有点按压反馈，否则点下去毫无感觉，像在点网页 */
+.mh-card:active {
+  transform: scale(0.97);
+  opacity: 0.85;
+}
+/* 封面用 16:9（原来写死高 110，卡片一宽就被压扁） */
 .mh-thumb {
   position: relative;
   width: 100%;
-  height: 110px;
-  border-radius: 6px;
+  /* 用 16:9 而不是写死高度：写死 110px 时卡片一宽，封面就被拉成奇怪的扁比，
+     而且不同屏宽下高度不跟着变，看着像网页里的图片而不是 App 的封面。 */
+  aspect-ratio: 16 / 9;
+  border-radius: 10px;
   overflow: hidden;
   background: var(--chip);
 }
@@ -444,17 +453,20 @@ watch(
   font-size: 11px;
   line-height: 1.5;
 }
-/* 标题一行截断 */
+/* 标题两行截断：手机上卡片宽只有 176px 左右，一行装不下几个字，
+   截断后基本看不出在播什么。两行 + 固定高度，卡片仍然对齐。 */
 .mh-title {
-  font-size: 13px;
-  line-height: 1.4;
+  font-size: 14px;
+  line-height: 1.35;
   color: var(--fg);
-  white-space: nowrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
+  min-height: 2.7em;
 }
 .mh-streamer {
-  font-size: 12px;
+  font-size: 12.5px;
   color: var(--fg-dim);
   white-space: nowrap;
   overflow: hidden;

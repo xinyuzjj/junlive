@@ -189,11 +189,13 @@ onMounted(async () => {
           <path d="M3 10.5 12 3l9 7.5" />
           <path d="M5 9.5V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9.5" />
         </svg>
+        <span class="m-tab-l">首页</span>
       </button>
       <button :class="{ on: view === 'follow' }" aria-label="关注" @click="go('/follow')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
           <path d="M12 3.6l2.6 5.3 5.8.85-4.2 4.1 1 5.8L12 16.9l-5.2 2.75 1-5.8-4.2-4.1 5.8-.85z" />
         </svg>
+        <span class="m-tab-l">关注</span>
       </button>
       <button :class="{ on: view === 'classify' }" aria-label="分类" @click="go('/classify')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -202,12 +204,14 @@ onMounted(async () => {
           <rect x="3.5" y="13.5" width="7" height="7" rx="1.6" />
           <rect x="13.5" y="13.5" width="7" height="7" rx="1.6" />
         </svg>
+        <span class="m-tab-l">分类</span>
       </button>
       <button :class="{ on: isMe }" aria-label="我的" @click="go('/me')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="8" r="3.6" />
           <path d="M4.5 20c0-3.6 3.4-6 7.5-6s7.5 2.4 7.5 6" />
         </svg>
+        <span class="m-tab-l">我的</span>
       </button>
     </nav>
   </div>
@@ -278,16 +282,17 @@ onMounted(async () => {
 /* 深色开关：热区 44×44 */
 .m-dark {
   flex-shrink: 0;
-  width: 44px;
-  height: 44px;
+  /* 和搜索框同高同圆角同底色，否则会像一块独立的白方块贴在右上角 */
+  width: 40px;
+  height: 40px;
   padding: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   border: 1px solid var(--border-2);
   border-radius: 10px;
-  background: var(--chip);
-  color: var(--fg);
+  background: var(--bg);
+  color: var(--fg-dim);
 }
 .m-dark svg {
   width: 20px;
@@ -304,12 +309,13 @@ onMounted(async () => {
 }
 
 /* ---------- 底部 4 tab ----------
-   高度 56 + 底部安全区；每个 tab 热区 = 高 56 × 宽 1/4（≥48）。
-   只显示图标（Simple Live 的做法），不带文字标签。 */
+   高度 58 + 底部安全区；每个 tab 热区 = 高 58 × 宽 1/4（≥48）。
+   图标 + 文字：只放图标会让 4 个 tab 之间看着空、分不清谁是谁，
+   中文 App（抖音/B站/快手）底部都是「图标 + 小字」。 */
 .m-tabs {
   display: flex;
   flex-shrink: 0;
-  height: 56px;
+  height: 58px;
   background: var(--panel);
   border-top: 1px solid var(--border);
   padding-bottom: env(safe-area-inset-bottom, 0px);
@@ -318,18 +324,28 @@ onMounted(async () => {
   flex: 1;
   min-height: 48px;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 3px;
   border: 0;
   background: none;
   color: var(--fg-dim);
 }
 .m-tabs button svg {
-  width: 24px;
-  height: 24px;
+  width: 23px;
+  height: 23px;
+}
+.m-tab-l {
+  font-size: 10.5px;
+  line-height: 1;
+  letter-spacing: 0.2px;
 }
 .m-tabs button.on {
   color: var(--brand);
+}
+.m-tabs button.on .m-tab-l {
+  font-weight: 600;
 }
 .m-tabs button:active {
   background: var(--chip);
