@@ -18,6 +18,12 @@ struct SetImmersiveArgs {
     enable: bool,
 }
 
+#[derive(serde::Deserialize, serde::Serialize)]
+struct SetOrientationArgs {
+    /// landscape / portrait / auto
+    orientation: String,
+}
+
 /// 安卓插件句柄。非安卓平台不会注册，`try_state` 取不到。
 pub struct ImmersiveHandle<R: Runtime>(PluginHandle<R>);
 
@@ -54,6 +60,31 @@ pub fn set<R: Runtime>(app: &AppHandle<R>, enable: bool) -> bool {
     #[cfg(not(target_os = "android"))]
     {
         let _ = (app, enable);
+        false
+    }
+}
+
+/// 强制屏幕方向：`landscape` / `portrait` / `auto`。
+/// 返回 true 表示真的下发了。安卓之外恒为 false。
+pub fn set_orientation<R: Runtime>(app: &AppHandle<R>, orientation: &str) -> bool {
+    #[cfg(target_os = "android")]
+    {
+        if let Some(h) = app.try_state::<ImmersiveHandle<R>>() {
+            return h
+                .0
+                .run_mobile_plugin::<()>(
+                    "setOrientation",
+                    SetOrientationArgs {
+                        orientation: orientation.to_string(),
+                    },
+                )
+                .is_ok();
+        }
+        false
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = (app, orientation);
         false
     }
 }

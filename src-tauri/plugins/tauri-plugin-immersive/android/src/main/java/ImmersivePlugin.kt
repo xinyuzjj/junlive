@@ -1,6 +1,7 @@
 package com.junlive.immersive
 
 import android.app.Activity
+import android.content.pm.ActivityInfo
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import app.tauri.annotation.Command
@@ -12,6 +13,12 @@ import app.tauri.plugin.Plugin
 @InvokeArg
 class SetImmersiveArgs {
     var enable: Boolean = false
+}
+
+@InvokeArg
+class SetOrientationArgs {
+    // landscape / portrait / auto
+    var orientation: String = "auto"
 }
 
 /**
@@ -39,6 +46,33 @@ class ImmersivePlugin(private val activity: Activity) : Plugin(activity) {
                     controller.hide(WindowInsetsCompat.Type.systemBars())
                 } else {
                     controller.show(WindowInsetsCompat.Type.systemBars())
+                }
+                invoke.resolve()
+            }
+        } catch (ex: Exception) {
+            invoke.reject(ex.message)
+        }
+    }
+
+    /**
+     * 强制屏幕方向。
+     *
+     * 为什么不用 Web 的 screen.orientation.lock()：安卓 WebView 上它经常直接失败
+     * （非全屏元素、或系统禁止），结果就是「用户点了全屏，画面还是竖的，
+     * 只能一直提示他自己转手机」。
+     *
+     * SENSOR_LANDSCAPE / SENSOR_PORTRAIT 而不是 LANDSCAPE / PORTRAIT：
+     * 允许正反两种握持方向，用户怎么拿都行。
+     */
+    @Command
+    fun setOrientation(invoke: Invoke) {
+        try {
+            val args = invoke.parseArgs(SetOrientationArgs::class.java)
+            activity.runOnUiThread {
+                activity.requestedOrientation = when (args.orientation) {
+                    "landscape" -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                    "portrait" -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+                    else -> ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
                 }
                 invoke.resolve()
             }

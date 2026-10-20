@@ -359,6 +359,21 @@ export async function androidImmersive(enable: boolean): Promise<{ applied: bool
 }
 
 /**
+ * 强制屏幕方向：`landscape` / `portrait` / `auto`。
+ *
+ * 为什么不用 `screen.orientation.lock()`：它在安卓 WebView 上经常直接失败，
+ * 结果就是「用户点了全屏，画面还是竖的，只能一直提示他自己转手机」。
+ * 这里在 Activity 层设 `requestedOrientation`，点了就真的转过去。
+ *
+ * 非安卓恒为 applied=false（桌面端窗口全屏即可，不需要转）。
+ */
+export async function androidOrientation(
+  orientation: "landscape" | "portrait" | "auto",
+): Promise<{ applied: boolean; detail: string }> {
+  return invoke<{ applied: boolean; detail: string }>("android_orientation", { orientation });
+}
+
+/**
  * 这个平台要不要走代理。
  *
  * ⚠️ 与 Rust 侧 `lib.rs::OVERSEAS_PLATFORMS` 和 `net.rs` 的分流必须一致：

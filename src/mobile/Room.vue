@@ -30,6 +30,7 @@ import {
   getRoom,
   setStreamRenew,
   androidImmersive,
+  androidOrientation,
   startDanmaku,
   stopDanmaku,
   thumbUrl,
@@ -154,7 +155,12 @@ async function toggleFull() {
         /* 锁不住就靠下面那行提示让用户自己转 */
       }
     }
+    // 上面那条在安卓 WebView 上基本必失败，所以真正管用的是这句：
+    // 在 Activity 层设 requestedOrientation，点了就真的转过去。
+    androidOrientation("landscape").catch(() => {});
   } else {
+    // 退出全屏要转回竖屏并放开锁定，否则整机都卡在横屏
+    androidOrientation("auto").catch(() => {});
     if (ctrlTimer) {
       window.clearTimeout(ctrlTimer);
       ctrlTimer = null;
@@ -633,6 +639,8 @@ onBeforeUnmount(() => {
   // 系统栏同理：退出房间必须把状态栏/导航栏还回来，
   // 否则退回首页后整个界面少一条系统栏，看着像没铺满。
   androidImmersive(false).catch(() => {});
+  // 方向同理：退出房间必须放开方向锁定，否则整个 App 卡在横屏。
+  androidOrientation("auto").catch(() => {});
 });
 </script>
 

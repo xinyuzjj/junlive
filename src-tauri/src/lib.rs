@@ -455,7 +455,7 @@ async fn set_youtube_cookie(cookie: Option<String>) {
     net::set_yt_cookie(cookie);
 }
 
-use immersive::android_immersive;
+use immersive::{android_immersive, android_orientation};
 
 
 /// 需要走代理的平台（海外）。
@@ -532,6 +532,7 @@ pub fn run() {
             resolve_replay,
             set_stream_renew,
             android_immersive,
+            android_orientation,
             routing::needs_proxy,
             get_proxy_setting,
             set_proxy_setting,

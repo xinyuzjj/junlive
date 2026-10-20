@@ -55,3 +55,19 @@ pub fn android_immersive(app: AppHandle, enable: bool) -> ImmersiveResult {
     }
     ImmersiveResult { applied, detail }
 }
+
+/// 强制屏幕方向（`landscape` / `portrait` / `auto`）。
+///
+/// 为什么需要它：`screen.orientation.lock()` 在安卓 WebView 上经常直接失败，
+/// 结果就是「用户点了全屏，画面还是竖的，只能一直提示他自己转手机」。
+/// 在 Activity 层设 `requestedOrientation` 才是可靠的。
+#[tauri::command]
+pub fn android_orientation(app: AppHandle, orientation: String) -> ImmersiveResult {
+    let applied = tauri_plugin_immersive::set_orientation(&app, &orientation);
+    let detail = if applied {
+        String::new()
+    } else {
+        "非安卓平台，或插件未注册".into()
+    };
+    ImmersiveResult { applied, detail }
+}
