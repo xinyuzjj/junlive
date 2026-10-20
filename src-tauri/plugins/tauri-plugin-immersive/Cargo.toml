@@ -1,0 +1,21 @@
+[package]
+name = "tauri-plugin-immersive"
+version = "0.1.0"
+edition = "2021"
+description = "隐藏安卓系统状态栏与导航栏"
+license = "MIT"
+# tauri 的构建流程靠 links 找到 android/ 目录，缺了它插件不会被并进 APK
+links = "tauri-plugin-immersive"
+exclude = ["android/.tauri"]
+
+[lib]
+name = "tauri_plugin_immersive"
+path = "src/lib.rs"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[dependencies]
+tauri = { version = "2", default-features = false }
+serde = { version = "1", features = ["derive"] }
+
+[build-dependencies]
+tauri-plugin = { version = "2", features = ["build"] }
