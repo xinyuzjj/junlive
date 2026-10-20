@@ -2275,6 +2275,7 @@ dependencies = [
  "serde_json",
  "tauri",
  "tauri-build",
+ "tauri-plugin-immersive",
  "tauri-plugin-opener",
  "tauri-plugin-process",
  "tauri-plugin-updater",
@@ -4451,6 +4452,15 @@ dependencies = [
  "serde_json",
  "tauri-utils",
  "walkdir",
+]
+
+[[package]]
+name = "tauri-plugin-immersive"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "tauri",
+ "tauri-plugin",
 ]
 
 [[package]]
